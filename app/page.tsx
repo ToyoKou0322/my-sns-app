@@ -23,12 +23,15 @@ export default function Home() {
 
   // 2. 部屋リスト監視
   useEffect(() => {
+    // ログインしていない時はエラーになるので監視しない
+    if (!user) return;
+
     const q = query(collection(db, "rooms"), orderBy("createdAt", "desc"));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       setRooms(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
     });
     return () => unsubscribe();
-  }, []);
+  }, [user]); // ← ★「user」が変わるたびに、つなぎ直すように指示します
 
   // 3. ログアウト処理
   const handleLogout = async () => {
