@@ -4,7 +4,7 @@
 import { useState } from "react";
 import { 
   addDoc, collection, doc, updateDoc, 
-  arrayUnion, arrayRemove // ← 追加
+  arrayUnion, arrayRemove
 } from "firebase/firestore";
 import { updateProfile } from "firebase/auth";
 import { auth, db } from "../firebaseConfig";
@@ -16,7 +16,6 @@ type Props = {
   handleLogout: () => void;
 };
 
-// ランダムなアバター画像のURLを作る関数 (ドット絵スタイル)
 const getRandomAvatar = () => {
   const randomSeed = Math.random().toString(36).substring(7);
   return `https://api.dicebear.com/7.x/pixel-art/svg?seed=${randomSeed}`;
@@ -24,16 +23,14 @@ const getRandomAvatar = () => {
 
 export default function RoomList({ user, rooms, setCurrentRoom, handleLogout }: Props) {
   const [newRoomName, setNewRoomName] = useState("");
-  
-  // 編集用のステート
   const [newName, setNewName] = useState("");
   const [newIcon, setNewIcon] = useState("");
   const [isEditing, setIsEditing] = useState(false);
-
-  // ▼ 表示モード（all = 全て, bookmarked = お気に入りのみ）
   const [filterMode, setFilterMode] = useState<"all" | "bookmarked">("all");
 
-  // 部屋作成
+  // ▼ 検索用の文字を入れる箱
+  const [searchQuery, setSearchQuery] = useState("");
+
   const handleCreateRoom = async () => {
     if (!newRoomName) return;
     try {
@@ -41,7 +38,7 @@ export default function RoomList({ user, rooms, setCurrentRoom, handleLogout }: 
         title: newRoomName,
         createdAt: new Date(),
         createdBy: user.displayName,
-        bookmarkedBy: [], // 初期値は空っぽ
+        bookmarkedBy: [],
       });
       setNewRoomName("");
       alert("部屋を作成しました！");
@@ -50,7 +47,6 @@ export default function RoomList({ user, rooms, setCurrentRoom, handleLogout }: 
     }
   };
 
-  // プロフィール更新
   const handleUpdateProfile = async () => {
     if (!newName || !auth.currentUser) return;
     try {
@@ -71,10 +67,8 @@ export default function RoomList({ user, rooms, setCurrentRoom, handleLogout }: 
     setIsEditing(true);
   };
 
-  // ▼ ブックマークの切り替え処理
   const handleBookmark = async (e: React.MouseEvent, room: any) => {
-    e.stopPropagation(); // 親の「部屋に入る」クリックイベントを止める
-    
+    e.stopPropagation();
     const currentBookmarkedBy = room.bookmarkedBy || [];
     const isBookmarked = currentBookmarkedBy.includes(user.uid);
     const roomRef = doc(db, "rooms", room.id);
@@ -86,16 +80,22 @@ export default function RoomList({ user, rooms, setCurrentRoom, handleLogout }: 
     }
   };
 
-  // ▼ 表示する部屋をフィルタリング
+  // ▼ 表示する部屋をフィルタリング（絞り込み）
   const displayedRooms = rooms.filter((room) => {
-    if (filterMode === "all") return true;
-    // bookmarked モードなら、自分のIDが含まれている部屋だけ残す
-    return room.bookmarkedBy?.includes(user.uid);
+    // 1. タブの条件（すべて or お気に入り）
+    const matchTab = filterMode === "all" || room.bookmarkedBy?.includes(user.uid);
+    
+    // 2. 検索の条件（タイトルに文字が含まれているか？）
+    // ※ toLowerCase() を使って、大文字小文字を区別せずに検索できるようにします
+    const matchSearch = room.title.toLowerCase().includes(searchQuery.toLowerCase());
+
+    // 両方の条件を満たすものだけ表示
+    return matchTab && matchSearch;
   });
 
   return (
     <div className="p-10 max-w-2xl mx-auto">
-      {/* ヘッダー部分 */}
+      {/* ヘッダー */}
       <div className="flex justify-between items-start mb-8 border-b pb-4">
         <h1 className="text-2xl font-bold mt-2">スレッド一覧</h1>
         
@@ -148,7 +148,7 @@ export default function RoomList({ user, rooms, setCurrentRoom, handleLogout }: 
         </div>
       </div>
 
-      {/* ▼ タブ切り替えボタン */}
+      {/* タブ切り替えボタン */}
       <div className="flex gap-4 mb-4 border-b">
         <button 
           onClick={() => setFilterMode("all")}
@@ -162,6 +162,20 @@ export default function RoomList({ user, rooms, setCurrentRoom, handleLogout }: 
         >
           お気に入り ★
         </button>
+      </div>
+
+      {/* ▼ 検索バーを追加！ */}
+      <div className="mb-6">
+        <div className="relative">
+          <span className="absolute left-3 top-2.5 text-gray-400">🔍</span>
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="部屋名で検索..."
+            className="w-full border p-2 pl-10 rounded-lg bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-300 text-black"
+          />
+        </div>
       </div>
 
       {/* 部屋リスト表示 */}
@@ -179,8 +193,6 @@ export default function RoomList({ user, rooms, setCurrentRoom, handleLogout }: 
                 <h3 className="text-xl font-bold text-blue-600 group-hover:underline">{room.title}</h3>
                 <p className="text-xs text-gray-400">作成者: {room.createdBy}</p>
               </div>
-              
-              {/* ▼ ブックマークボタン（星マーク） */}
               <button 
                 onClick={(e) => handleBookmark(e, room)}
                 className={`text-2xl transition hover:scale-110 ${isBookmarked ? "text-yellow-400" : "text-gray-300 hover:text-yellow-200"}`}
@@ -193,8 +205,8 @@ export default function RoomList({ user, rooms, setCurrentRoom, handleLogout }: 
         })}
         
         {displayedRooms.length === 0 && (
-          <p className="text-gray-400 py-4">
-            {filterMode === "bookmarked" ? "お気に入りの部屋はまだありません。" : "部屋がありません。"}
+          <p className="text-gray-400 py-4 text-center">
+            {searchQuery ? "見つかりませんでした。" : (filterMode === "bookmarked" ? "お気に入りの部屋はまだありません。" : "部屋がありません。")}
           </p>
         )}
       </div>
