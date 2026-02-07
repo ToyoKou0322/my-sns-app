@@ -15,7 +15,7 @@ export default function Login() {
 
   return (
     <div className="p-10 text-center">
-      <h1 className="text-3xl font-bold mb-4">スレッドSNS</h1>
+      <h1 className="text-3xl font-bold mb-4">TalkRoom</h1>
       <button onClick={handleLogin} className="bg-blue-500 text-white px-6 py-3 rounded-lg font-bold">
         Googleでログインして始める
       </button>

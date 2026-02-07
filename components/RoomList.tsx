@@ -126,7 +126,7 @@ export default function RoomList({ user, rooms, setCurrentRoom, handleLogout }: 
     <div className="p-10 max-w-2xl mx-auto">
       {/* ヘッダー */}
       <div className="flex justify-between items-start mb-8 border-b pb-4">
-        <h1 className="text-2xl font-bold mt-2">スレッド一覧</h1>
+        <h1 className="text-2xl font-bold mt-2">トークルーム一覧</h1>
         
         <div className="text-right">
           {isEditing ? (
