@@ -4,7 +4,7 @@
 import { useState, useEffect, useRef } from "react";
 import { 
   collection, addDoc, query, orderBy, onSnapshot,
-  deleteDoc, doc, updateDoc, where,
+  deleteDoc, doc, updateDoc, where, getDoc, setDoc, // ← setDoc, getDocを追加
   arrayUnion, arrayRemove
 } from "firebase/firestore"; 
 import { db } from "../firebaseConfig";
@@ -117,6 +117,48 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
     }
   };
 
+  // ▼ DMを開始する機能
+  const handleStartDM = async (targetUser: any) => {
+    if (targetUser.uid === user.uid) return; // 自分自身にはDM送れない
+    if (!window.confirm(`${targetUser.author}さんにDMを送りますか？`)) return;
+
+    // 1. 2人のUIDをソートして、常に同じ部屋IDになるようにする
+    // (Aさん→Bさん でも Bさん→Aさん でも同じ部屋IDにするため)
+    const memberIds = [user.uid, targetUser.uid].sort();
+    const dmRoomId = `dm_${memberIds[0]}_${memberIds[1]}`;
+
+    try {
+      // 2. 部屋がすでにあるか確認
+      const roomRef = doc(db, "rooms", dmRoomId);
+      const roomSnap = await getDoc(roomRef);
+
+      if (!roomSnap.exists()) {
+        // 3. なければ作成 (setDocを使ってIDを指定して作る)
+        await setDoc(roomRef, {
+          title: `DM: ${user.displayName} & ${targetUser.author}`,
+          createdAt: new Date(),
+          createdBy: "system",
+          members: memberIds, // メンバーを記録
+          type: "dm",         // タイプをDMにする
+          ownerId: user.uid   // 一応作った人を記録
+        });
+      }
+
+      // 4. その部屋に移動
+      // 移動するために必要なデータを整形
+      const roomData = { 
+        id: dmRoomId, 
+        title: roomSnap.exists() ? roomSnap.data().title : `DM: ${user.displayName} & ${targetUser.author}`,
+        type: "dm"
+      };
+      setCurrentRoom(roomData);
+
+    } catch (error) {
+      console.error("DM Error:", error);
+      alert("DMの開始に失敗しました");
+    }
+  };
+
   return (
     <div className="p-6 max-w-2xl mx-auto pb-40">
       {/* ヘッダー */}
@@ -127,7 +169,11 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
         >
           ← 戻る
         </button>
-        <h2 className="text-xl font-bold truncate text-black">{currentRoom.title}</h2>
+        <h2 className="text-xl font-bold truncate text-black">
+          {/* DMの場合は特別なアイコンを表示 */}
+          {currentRoom.type === "dm" ? "🔒 " : "# "}
+          {currentRoom.title}
+        </h2>
         <div className="w-10"></div>
       </div>
 
@@ -140,21 +186,29 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
           return (
             <div key={post.id} className={`flex gap-2 mb-4 max-w-[80%] ${post.uid === user.uid ? "ml-auto flex-row-reverse" : ""}`}>
               
-              {/* アイコン画像 */}
-              {post.photoURL ? (
-                <img 
-                  src={post.photoURL} 
-                  alt="icon" 
-                  className="w-10 h-10 rounded-full border border-gray-300"
-                />
-              ) : (
-                <div className="w-10 h-10 rounded-full bg-gray-300 flex-shrink-0"></div>
-              )}
+              {/* アイコン画像 (クリックでDM開始) */}
+              <div 
+                className="cursor-pointer hover:opacity-80"
+                onClick={() => handleStartDM(post)}
+                title="クリックしてDMを送る"
+              >
+                {post.photoURL ? (
+                  <img src={post.photoURL} alt="icon" className="w-10 h-10 rounded-full border border-gray-300"/>
+                ) : (
+                  <div className="w-10 h-10 rounded-full bg-gray-300 flex-shrink-0"></div>
+                )}
+              </div>
 
               {/* 吹き出しエリア */}
               <div className={`p-3 rounded-lg ${post.uid === user.uid ? "bg-blue-100" : "bg-gray-100"}`}>
                 <div className="flex justify-between items-end mb-1 min-w-[100px]">
-                  <p className="text-xs text-gray-500 font-bold">{post.author}</p>
+                  {/* 名前もクリックでDM開始 */}
+                  <p 
+                    className="text-xs text-gray-500 font-bold cursor-pointer hover:underline"
+                    onClick={() => handleStartDM(post)}
+                  >
+                    {post.author}
+                  </p>
                   <p className="text-[10px] text-gray-400 ml-2">{formatDate(post.createdAt)}</p>
                 </div>
                 
@@ -232,6 +286,6 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
           </div>
         </div>
       </div>
-    </div> 
+    </div>
   );
 }
