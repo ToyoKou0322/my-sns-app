@@ -1,12 +1,15 @@
 "use client";
 
-import { useState, useEffect } from "react"; // useEffect を追加
+import { useState, useEffect } from "react";
 import { 
   collection, 
   addDoc, 
   query, 
   orderBy, 
-  onSnapshot // データをリアルタイムで監視する機能
+  onSnapshot,
+  deleteDoc, // 削除用に追加
+  doc,       // 特定のデータを指定する用に追加
+  updateDoc  // 更新(いいね)用に追加
 } from "firebase/firestore"; 
 import { signInWithPopup, GoogleAuthProvider, signOut } from "firebase/auth";
 import { auth, db } from "../firebaseConfig";
@@ -14,15 +17,10 @@ import { auth, db } from "../firebaseConfig";
 export default function Home() {
   const [user, setUser] = useState<any>(null);
   const [inputText, setInputText] = useState("");
-  // 投稿データを保存するリスト
   const [posts, setPosts] = useState<any[]>([]);
 
-  // アプリが起動したら、自動でデータを監視スタート！
   useEffect(() => {
-    // "posts" の中身を、新しい順（desc）に並べて取得する命令
     const q = query(collection(db, "posts"), orderBy("createdAt", "desc"));
-
-    // データベースに変更があるたびに、この処理が動く（リアルタイム更新）
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const postsData = snapshot.docs.map((doc) => ({
         id: doc.id,
@@ -30,8 +28,7 @@ export default function Home() {
       }));
       setPosts(postsData);
     });
-
-    return () => unsubscribe(); // 画面を閉じた時に監視を終了
+    return () => unsubscribe();
   }, []);
 
   const handleLogin = async () => {
@@ -55,12 +52,38 @@ export default function Home() {
       await addDoc(collection(db, "posts"), {
         text: inputText,
         author: user.displayName,
+        uid: user.uid, // 誰が書いたか識別するためのIDを追加
         createdAt: new Date(),
+        likes: 0, // いいね数の初期値は0
       });
       setInputText("");
     } catch (error) {
       console.error("投稿エラー:", error);
       alert("投稿に失敗しました");
+    }
+  };
+
+  // ▼ [削除機能] 
+  const handleDelete = async (id: string) => {
+    // 確認ダイアログを出す
+    if (!window.confirm("本当に削除しますか？")) return;
+    try {
+      // postsコレクションの中の、指定されたidのドキュメントを削除
+      await deleteDoc(doc(db, "posts", id));
+    } catch (error) {
+      console.error("削除エラー:", error);
+    }
+  };
+
+  // ▼ [いいね機能]
+  const handleLike = async (id: string, currentLikes: number) => {
+    try {
+      // postsコレクションの中の、指定されたidのデータを更新
+      await updateDoc(doc(db, "posts", id), {
+        likes: currentLikes + 1 // 現在の数に+1する
+      });
+    } catch (error) {
+      console.error("いいねエラー:", error);
     }
   };
 
@@ -103,14 +126,39 @@ export default function Home() {
         </div>
       )}
 
-      {/* ▼ ここから下：タイムライン表示エリア ▼ */}
       <div className="border-t pt-6">
         <h2 className="text-xl font-bold mb-4">タイムライン</h2>
         
         {posts.map((post) => (
-          <div key={post.id} className="bg-gray-100 p-4 mb-3 rounded-lg">
-            <p className="font-bold text-sm text-gray-600 mb-1">{post.author}</p>
-            <p className="text-lg text-gray-800">{post.text}</p>
+          <div key={post.id} className="bg-gray-100 p-4 mb-3 rounded-lg shadow-sm">
+            <div className="flex justify-between items-start">
+              <div>
+                <p className="font-bold text-sm text-gray-600 mb-1">{post.author}</p>
+                <p className="text-lg text-gray-800 mb-2">{post.text}</p>
+              </div>
+              
+              {/* 自分の投稿の時だけ削除ボタンを表示 */}
+              {user && post.uid === user.uid && (
+                <button 
+                  onClick={() => handleDelete(post.id)}
+                  className="text-gray-400 hover:text-red-500 text-sm"
+                  title="削除"
+                >
+                  🗑️
+                </button>
+              )}
+            </div>
+
+            {/* いいねボタンエリア */}
+            <div className="flex items-center mt-2">
+              <button 
+                onClick={() => handleLike(post.id, post.likes || 0)}
+                className="flex items-center text-pink-500 hover:bg-pink-100 px-2 py-1 rounded transition"
+              >
+                <span className="mr-1">🩷</span>
+                <span>{post.likes || 0}</span>
+              </button>
+            </div>
           </div>
         ))}
 
