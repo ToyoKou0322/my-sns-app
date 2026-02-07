@@ -71,7 +71,7 @@ export default function Home() {
     if (scrollBottomRef.current) {
       scrollBottomRef.current.scrollIntoView({ behavior: "smooth" });
     }
-  }, [posts]);
+  }, [posts.length, currentRoom]);
 
   const handleLogin = async () => {
     try {
