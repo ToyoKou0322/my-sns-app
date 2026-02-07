@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react"; // ← useRef を追加
 import { 
   collection, addDoc, query, orderBy, onSnapshot,
-  deleteDoc, doc, updateDoc, where // ← 'where' (条件検索) を追加
+  deleteDoc, doc, updateDoc, where
 } from "firebase/firestore"; 
 import { 
   signInWithPopup, 
@@ -13,60 +13,63 @@ import {
 } from "firebase/auth";
 import { auth, db } from "../firebaseConfig";
 
+// ▼ 日付を「2/7 10:30」のような形にする関数
+const formatDate = (timestamp: any) => {
+  if (!timestamp) return "";
+  const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+  return date.toLocaleString('ja-JP', { 
+    month: 'numeric', 
+    day: 'numeric', 
+    hour: '2-digit', 
+    minute: '2-digit' 
+  });
+};
+
 export default function Home() {
   const [user, setUser] = useState<any>(null);
-  
-  // ▼ 部屋（スレッド）関連の変数
-  const [rooms, setRooms] = useState<any[]>([]);       // 部屋リスト
-  const [currentRoom, setCurrentRoom] = useState<any>(null); // 今いる部屋
-  const [newRoomName, setNewRoomName] = useState("");  // 新しい部屋の名前入力
-
-  // ▼ 投稿・チャット関連の変数
+  const [rooms, setRooms] = useState<any[]>([]);
+  const [currentRoom, setCurrentRoom] = useState<any>(null);
+  const [newRoomName, setNewRoomName] = useState("");
   const [posts, setPosts] = useState<any[]>([]);
   const [inputText, setInputText] = useState("");
-  
-  // ▼ ユーザー情報変更用
   const [newName, setNewName] = useState("");
   const [isEditingName, setIsEditingName] = useState(false);
 
-  // 1. 起動時に「部屋リスト」を監視する
+  // ▼ 自動スクロールのための「目印」を用意
+  const scrollBottomRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     const unsubscribeAuth = auth.onAuthStateChanged((u) => setUser(u));
-
-    // 部屋一覧は「作られた順」に取得
     const q = query(collection(db, "rooms"), orderBy("createdAt", "desc"));
     const unsubscribeRooms = onSnapshot(q, (snapshot) => {
       setRooms(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
     });
-
     return () => {
       unsubscribeAuth();
       unsubscribeRooms();
     };
   }, []);
 
-  // 2. 「今いる部屋」が変わったら、その部屋の投稿だけを取得し直す
   useEffect(() => {
-    if (!currentRoom) return; // 部屋に入っていない時は何もしない
-
-    // 「posts」の中から「roomId が今の部屋と同じ」ものだけを探す
+    if (!currentRoom) return;
     const q = query(
       collection(db, "posts"), 
-      where("roomId", "==", currentRoom.id), // ← ここが重要！
-      orderBy("createdAt", "asc") // チャットっぽく古い順（上から下）に表示
+      where("roomId", "==", currentRoom.id),
+      orderBy("createdAt", "asc")
     );
-
     const unsubscribePosts = onSnapshot(q, (snapshot) => {
       setPosts(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
-    }, (error) => {
-      // ※重要：インデックスエラー対策
-      console.error("データ取得エラー:", error);
     });
-
     return () => unsubscribePosts();
-  }, [currentRoom]); // currentRoomが変わるたびに実行
+  }, [currentRoom]);
 
-  // --- ログイン・ログアウト ---
+  // ▼ [新機能] 投稿リスト(posts)が更新されたら、自動で一番下にスクロールする
+  useEffect(() => {
+    if (scrollBottomRef.current) {
+      scrollBottomRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [posts]); // postsが変わるたびに実行される
+
   const handleLogin = async () => {
     try {
       await signInWithPopup(auth, new GoogleAuthProvider());
@@ -77,10 +80,9 @@ export default function Home() {
 
   const handleLogout = async () => {
     await signOut(auth);
-    setCurrentRoom(null); // ログアウトしたら部屋から出る
+    setCurrentRoom(null);
   };
 
-  // --- 部屋を作る機能 ---
   const handleCreateRoom = async () => {
     if (newRoomName === "") return;
     try {
@@ -96,7 +98,6 @@ export default function Home() {
     }
   };
 
-  // --- 投稿する機能 ---
   const handleAddPost = async () => {
     if (inputText === "") return;
     try {
@@ -104,7 +105,7 @@ export default function Home() {
         text: inputText,
         author: user.displayName,
         uid: user.uid,
-        roomId: currentRoom.id, // どの部屋の投稿か記録する
+        roomId: currentRoom.id,
         createdAt: new Date(),
         likes: 0,
       });
@@ -114,7 +115,6 @@ export default function Home() {
     }
   };
   
-  // --- その他の機能（削除・いいね・名前変更） ---
   const handleDelete = async (id: string) => {
     if (!window.confirm("削除しますか？")) return;
     await deleteDoc(doc(db, "posts", id));
@@ -130,9 +130,6 @@ export default function Home() {
     setIsEditingName(false);
   };
 
-  // ================= 画面表示 =================
-
-  // 1. ログインしていない時
   if (!user) {
     return (
       <div className="p-10 text-center">
@@ -144,7 +141,6 @@ export default function Home() {
     );
   }
 
-  // 2. 部屋に入っていない時（ロビー画面）
   if (!currentRoom) {
     return (
       <div className="p-10 max-w-2xl mx-auto">
@@ -156,7 +152,6 @@ export default function Home() {
           </div>
         </div>
 
-        {/* 部屋作成フォーム */}
         <div className="mb-8 p-4 bg-gray-100 rounded-lg">
           <h2 className="font-bold mb-2 text-black">新しい部屋を作る</h2>
           <div className="flex gap-2">
@@ -173,12 +168,11 @@ export default function Home() {
           </div>
         </div>
 
-        {/* 部屋リスト表示 */}
         <div className="grid gap-4">
           {rooms.map((room) => (
             <div 
               key={room.id} 
-              onClick={() => setCurrentRoom(room)} // クリックしたらその部屋に入る
+              onClick={() => setCurrentRoom(room)}
               className="border p-4 rounded-lg shadow-sm hover:bg-blue-50 cursor-pointer transition"
             >
               <h3 className="text-xl font-bold text-blue-600">{room.title}</h3>
@@ -188,7 +182,6 @@ export default function Home() {
           {rooms.length === 0 && <p>まだ部屋がありません。作ってみよう！</p>}
         </div>
         
-        {/* 名前変更エリア */}
         <div className="mt-10 pt-4 border-t">
             {isEditingName ? (
               <div className="flex gap-2">
@@ -203,37 +196,41 @@ export default function Home() {
     );
   }
 
-  // 3. 部屋に入っている時（チャット画面）
   return (
-    <div className="p-6 max-w-2xl mx-auto pb-24"> {/* pb-24は下の入力欄とかぶらないように */}
-      {/* ヘッダー */}
+    <div className="p-6 max-w-2xl mx-auto pb-24">
       <div className="flex justify-between items-center mb-4 border-b pb-4 sticky top-0 bg-white z-10">
         <button 
-          onClick={() => setCurrentRoom(null)} // 部屋を空に＝ロビーに戻る
+          onClick={() => setCurrentRoom(null)}
           className="text-gray-500 hover:text-black font-bold"
         >
           ← 戻る
         </button>
         <h2 className="text-xl font-bold truncate text-black">{currentRoom.title}</h2>
-        <div className="w-10"></div> {/* レイアウト調整用の空白 */}
+        <div className="w-10"></div>
       </div>
 
-      {/* タイムライン */}
       <div className="space-y-4">
         {posts.map((post) => (
           <div key={post.id} className={`p-4 rounded-lg max-w-[80%] ${post.uid === user.uid ? "bg-blue-100 ml-auto" : "bg-gray-100"}`}>
-            <p className="text-xs text-gray-500 mb-1">{post.author}</p>
+            <div className="flex justify-between items-end mb-1">
+              <p className="text-xs text-gray-500 font-bold">{post.author}</p>
+              <p className="text-[10px] text-gray-400 ml-2">{formatDate(post.createdAt)}</p>
+            </div>
+            
             <p className="text-gray-800 whitespace-pre-wrap">{post.text}</p>
-            <div className="flex justify-end mt-2 gap-2">
-               <button onClick={() => handleLike(post.id, post.likes || 0)} className="text-pink-500 text-xs">🩷 {post.likes || 0}</button>
-               {post.uid === user.uid && <button onClick={() => handleDelete(post.id)} className="text-gray-400 text-xs">🗑️</button>}
+            
+            <div className="flex justify-end mt-2 gap-2 items-center">
+               <button onClick={() => handleLike(post.id, post.likes || 0)} className="text-pink-500 text-xs hover:bg-white rounded px-1">🩷 {post.likes || 0}</button>
+               {post.uid === user.uid && <button onClick={() => handleDelete(post.id)} className="text-gray-400 text-xs hover:text-red-500">🗑️</button>}
             </div>
           </div>
         ))}
-        {posts.length === 0 && <p className="text-center text-gray-400 mt-10">まだ投稿がありません。<br/>一番乗りでコメントしよう！</p>}
+        {posts.length === 0 && <p className="text-center text-gray-400 mt-10">まだ投稿がありません。</p>}
+        
+        {/* ▼ ここに「見えない目印」を置く ▼ */}
+        <div ref={scrollBottomRef} />
       </div>
 
-      {/* 投稿フォーム（下に固定） */}
       <div className="fixed bottom-0 left-0 w-full bg-white border-t p-4">
         <div className="max-w-2xl mx-auto flex gap-2">
           <input
