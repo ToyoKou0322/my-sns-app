@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react"; // ← useRef を追加
+import { useState, useEffect, useRef } from "react";
 import { 
   collection, addDoc, query, orderBy, onSnapshot,
   deleteDoc, doc, updateDoc, where
@@ -13,7 +13,7 @@ import {
 } from "firebase/auth";
 import { auth, db } from "../firebaseConfig";
 
-// ▼ 日付を「2/7 10:30」のような形にする関数
+// ▼ 日付フォーマット関数
 const formatDate = (timestamp: any) => {
   if (!timestamp) return "";
   const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
@@ -35,7 +35,6 @@ export default function Home() {
   const [newName, setNewName] = useState("");
   const [isEditingName, setIsEditingName] = useState(false);
 
-  // ▼ 自動スクロールのための「目印」を用意
   const scrollBottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -63,12 +62,12 @@ export default function Home() {
     return () => unsubscribePosts();
   }, [currentRoom]);
 
-  // ▼ [新機能] 投稿リスト(posts)が更新されたら、自動で一番下にスクロールする
+  // ▼ 自動スクロール
   useEffect(() => {
     if (scrollBottomRef.current) {
       scrollBottomRef.current.scrollIntoView({ behavior: "smooth" });
     }
-  }, [posts]); // postsが変わるたびに実行される
+  }, [posts]);
 
   const handleLogin = async () => {
     try {
@@ -122,6 +121,8 @@ export default function Home() {
   const handleLike = async (id: string, currentLikes: number) => {
     await updateDoc(doc(db, "posts", id), { likes: currentLikes + 1 });
   };
+  
+  // ▼ 名前変更処理
   const handleUpdateName = async () => {
     if (!newName || !auth.currentUser) return;
     await updateProfile(auth.currentUser, { displayName: newName });
@@ -129,6 +130,8 @@ export default function Home() {
     setUser({ ...auth.currentUser });
     setIsEditingName(false);
   };
+
+  // --- 画面表示 ---
 
   if (!user) {
     return (
@@ -141,15 +144,45 @@ export default function Home() {
     );
   }
 
+  // ロビー画面（部屋一覧）
   if (!currentRoom) {
     return (
       <div className="p-10 max-w-2xl mx-auto">
-        <div className="flex justify-between items-center mb-8">
-          <h1 className="text-2xl font-bold">スレッド一覧</h1>
+        <div className="flex justify-between items-start mb-8 border-b pb-4">
+          <h1 className="text-2xl font-bold mt-2">スレッド一覧</h1>
+          
+          {/* ▼▼▼ ここを変更しました ▼▼▼ */}
           <div className="text-right">
-             <p className="text-sm text-gray-600 mb-1">{user.displayName}</p>
-             <button onClick={handleLogout} className="text-xs text-red-500 underline">ログアウト</button>
+            {isEditingName ? (
+              // 編集モード：入力欄と保存ボタン
+              <div className="flex items-center justify-end gap-2 mb-2">
+                <input 
+                  type="text" 
+                  value={newName} 
+                  onChange={(e) => setNewName(e.target.value)} 
+                  className="border p-1 text-sm rounded text-black w-32 bg-white"
+                />
+                <button onClick={handleUpdateName} className="bg-blue-500 text-white px-2 py-1 rounded text-xs whitespace-nowrap">保存</button>
+                <button onClick={() => setIsEditingName(false)} className="bg-gray-400 text-white px-2 py-1 rounded text-xs">✕</button>
+              </div>
+            ) : (
+              // 通常モード：名前と鉛筆ボタン
+              <div className="flex items-center justify-end gap-2 mb-2">
+                <p className="text-gray-800 font-bold">{user.displayName}</p>
+                <button 
+                  onClick={() => {
+                    setNewName(user.displayName); // 今の名前をセットしてから編集開始
+                    setIsEditingName(true);
+                  }} 
+                  className="text-gray-400 hover:text-blue-500"
+                >
+                  ✎
+                </button>
+              </div>
+            )}
+            <button onClick={handleLogout} className="text-xs text-red-500 underline">ログアウト</button>
           </div>
+          {/* ▲▲▲ ここまで ▲▲▲ */}
         </div>
 
         <div className="mb-8 p-4 bg-gray-100 rounded-lg">
@@ -181,21 +214,11 @@ export default function Home() {
           ))}
           {rooms.length === 0 && <p>まだ部屋がありません。作ってみよう！</p>}
         </div>
-        
-        <div className="mt-10 pt-4 border-t">
-            {isEditingName ? (
-              <div className="flex gap-2">
-                <input type="text" value={newName} onChange={(e)=>setNewName(e.target.value)} className="border p-1 text-black bg-white"/>
-                <button onClick={handleUpdateName} className="bg-blue-500 text-white px-2 rounded">保存</button>
-              </div>
-            ) : (
-              <button onClick={()=>setIsEditingName(true)} className="text-gray-500 text-sm">名前を変更する</button>
-            )}
-        </div>
       </div>
     );
   }
 
+  // チャット画面
   return (
     <div className="p-6 max-w-2xl mx-auto pb-24">
       <div className="flex justify-between items-center mb-4 border-b pb-4 sticky top-0 bg-white z-10">
@@ -226,8 +249,6 @@ export default function Home() {
           </div>
         ))}
         {posts.length === 0 && <p className="text-center text-gray-400 mt-10">まだ投稿がありません。</p>}
-        
-        {/* ▼ ここに「見えない目印」を置く ▼ */}
         <div ref={scrollBottomRef} />
       </div>
 
