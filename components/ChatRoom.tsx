@@ -4,7 +4,8 @@
 import { useState, useEffect, useRef } from "react";
 import { 
   collection, addDoc, query, orderBy, onSnapshot,
-  deleteDoc, doc, updateDoc, where
+  deleteDoc, doc, updateDoc, where,
+  arrayUnion, arrayRemove // ← ★これらを追加！
 } from "firebase/firestore"; 
 import { db } from "../firebaseConfig";
 
@@ -38,7 +39,7 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
   const prevPostsLength = useRef(0);
   const isRoomChanged = useRef(false);
 
-  // 1. 投稿データの監視 (部屋が変わったら再取得)
+  // 1. 投稿データの監視
   useEffect(() => {
     const q = query(
       collection(db, "posts"), 
@@ -78,7 +79,8 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
       uid: user.uid,
       roomId: currentRoom.id,
       createdAt: new Date(),
-      likes: 0,
+      // likes: 0, ← これはもう使いません
+      likedBy: [], // ★代わりに「誰がいいねしたかリスト」を作る
       type: "text"
     });
     setInputText("");
@@ -91,7 +93,7 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
       uid: user.uid,
       roomId: currentRoom.id,
       createdAt: new Date(),
-      likes: 0,
+      likedBy: [], // ★ここも変更
       type: "stamp"
     });
     setShowStamps(false);
@@ -102,8 +104,26 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
     await deleteDoc(doc(db, "posts", id));
   };
 
-  const handleLike = async (id: string, currentLikes: number) => {
-    await updateDoc(doc(db, "posts", id), { likes: currentLikes + 1 });
+  // ▼ いいねのロジックを大改造！
+  const handleLike = async (post: any) => {
+    // 昔の投稿データなどでlikedByがない場合は空配列として扱う
+    const currentLikedBy = post.likedBy || [];
+    
+    // すでに自分がいいねしているかチェック
+    const isLiked = currentLikedBy.includes(user.uid);
+    const postRef = doc(db, "posts", post.id);
+
+    if (isLiked) {
+      // 既にいいね済みなら → 解除する（配列から削除）
+      await updateDoc(postRef, {
+        likedBy: arrayRemove(user.uid)
+      });
+    } else {
+      // まだなら → いいねする（配列に追加）
+      await updateDoc(postRef, {
+        likedBy: arrayUnion(user.uid)
+      });
+    }
   };
 
   return (
@@ -122,25 +142,47 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
 
       {/* タイムライン */}
       <div className="space-y-4">
-        {posts.map((post) => (
-          <div key={post.id} className={`p-4 rounded-lg max-w-[80%] ${post.uid === user.uid ? "bg-blue-100 ml-auto" : "bg-gray-100"}`}>
-            <div className="flex justify-between items-end mb-1">
-              <p className="text-xs text-gray-500 font-bold">{post.author}</p>
-              <p className="text-[10px] text-gray-400 ml-2">{formatDate(post.createdAt)}</p>
+        {posts.map((post) => {
+          // ★自分がいいねしているか判定
+          const isLiked = post.likedBy ? post.likedBy.includes(user.uid) : false;
+          // ★いいねの数を計算 (古いデータのために post.likes も見てあげる)
+          const likeCount = post.likedBy ? post.likedBy.length : (post.likes || 0);
+
+          return (
+            <div key={post.id} className={`p-4 rounded-lg max-w-[80%] ${post.uid === user.uid ? "bg-blue-100 ml-auto" : "bg-gray-100"}`}>
+              <div className="flex justify-between items-end mb-1">
+                <p className="text-xs text-gray-500 font-bold">{post.author}</p>
+                <p className="text-[10px] text-gray-400 ml-2">{formatDate(post.createdAt)}</p>
+              </div>
+              
+              {post.type === "stamp" ? (
+                <p className="text-6xl">{post.text}</p>
+              ) : (
+                <p className="text-gray-800 whitespace-pre-wrap">{post.text}</p>
+              )}
+              
+              <div className="flex justify-end mt-2 gap-2 items-center">
+                {/* いいねボタン */}
+                <button 
+                  onClick={() => handleLike(post)} 
+                  className={`text-xs rounded px-2 py-1 transition flex items-center gap-1 ${
+                    isLiked 
+                      ? "bg-pink-100 text-pink-500 font-bold border border-pink-200" // いいね済み：ピンク
+                      : "bg-white text-gray-400 border border-gray-200 hover:bg-gray-50" // 未いいね：白
+                  }`}
+                >
+                  {isLiked ? "❤️" : "🤍"} <span>{likeCount}</span>
+                </button>
+
+                {post.uid === user.uid && (
+                  <button onClick={() => handleDelete(post.id)} className="text-gray-400 text-xs hover:text-red-500 ml-2">
+                    🗑️
+                  </button>
+                )}
+              </div>
             </div>
-            
-            {post.type === "stamp" ? (
-              <p className="text-6xl">{post.text}</p>
-            ) : (
-              <p className="text-gray-800 whitespace-pre-wrap">{post.text}</p>
-            )}
-            
-            <div className="flex justify-end mt-2 gap-2 items-center">
-               <button onClick={() => handleLike(post.id, post.likes || 0)} className="text-pink-500 text-xs hover:bg-white rounded px-1">🩷 {post.likes || 0}</button>
-               {post.uid === user.uid && <button onClick={() => handleDelete(post.id)} className="text-gray-400 text-xs hover:text-red-500">🗑️</button>}
-            </div>
-          </div>
-        ))}
+          );
+        })}
         {posts.length === 0 && <p className="text-center text-gray-400 mt-10">まだ投稿がありません。</p>}
         <div ref={scrollBottomRef} />
       </div>
