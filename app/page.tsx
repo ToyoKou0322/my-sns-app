@@ -13,7 +13,9 @@ import {
 } from "firebase/auth";
 import { auth, db } from "../firebaseConfig";
 
-// ▼ 日付フォーマット関数
+// ▼ スタンプのリスト（ここを好きに変えればスタンプが増えます）
+const STAMPS = ["👍", "🎉", "😂", "🙏", "❤️", "😭"];
+
 const formatDate = (timestamp: any) => {
   if (!timestamp) return "";
   const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
@@ -34,6 +36,9 @@ export default function Home() {
   const [inputText, setInputText] = useState("");
   const [newName, setNewName] = useState("");
   const [isEditingName, setIsEditingName] = useState(false);
+  
+  // ▼ スタンプパネルを開くかどうか
+  const [showStamps, setShowStamps] = useState(false);
 
   const scrollBottomRef = useRef<HTMLDivElement>(null);
 
@@ -62,7 +67,6 @@ export default function Home() {
     return () => unsubscribePosts();
   }, [currentRoom]);
 
-  // ▼ 自動スクロール
   useEffect(() => {
     if (scrollBottomRef.current) {
       scrollBottomRef.current.scrollIntoView({ behavior: "smooth" });
@@ -107,8 +111,27 @@ export default function Home() {
         roomId: currentRoom.id,
         createdAt: new Date(),
         likes: 0,
+        type: "text" // 普通のテキストだよ、という印
       });
       setInputText("");
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  // ▼ スタンプを送信する機能
+  const handleSendStamp = async (stamp: string) => {
+    try {
+      await addDoc(collection(db, "posts"), {
+        text: stamp, // 絵文字そのものをテキストとして保存
+        author: user.displayName,
+        uid: user.uid,
+        roomId: currentRoom.id,
+        createdAt: new Date(),
+        likes: 0,
+        type: "stamp" // 「これはスタンプだよ」という印をつける
+      });
+      setShowStamps(false); // 送信したらパネルを閉じる
     } catch (error) {
       console.error(error);
     }
@@ -122,7 +145,6 @@ export default function Home() {
     await updateDoc(doc(db, "posts", id), { likes: currentLikes + 1 });
   };
   
-  // ▼ 名前変更処理
   const handleUpdateName = async () => {
     if (!newName || !auth.currentUser) return;
     await updateProfile(auth.currentUser, { displayName: newName });
@@ -130,8 +152,6 @@ export default function Home() {
     setUser({ ...auth.currentUser });
     setIsEditingName(false);
   };
-
-  // --- 画面表示 ---
 
   if (!user) {
     return (
@@ -144,17 +164,13 @@ export default function Home() {
     );
   }
 
-  // ロビー画面（部屋一覧）
   if (!currentRoom) {
     return (
       <div className="p-10 max-w-2xl mx-auto">
         <div className="flex justify-between items-start mb-8 border-b pb-4">
           <h1 className="text-2xl font-bold mt-2">スレッド一覧</h1>
-          
-          {/* ▼▼▼ ここを変更しました ▼▼▼ */}
           <div className="text-right">
             {isEditingName ? (
-              // 編集モード：入力欄と保存ボタン
               <div className="flex items-center justify-end gap-2 mb-2">
                 <input 
                   type="text" 
@@ -166,12 +182,11 @@ export default function Home() {
                 <button onClick={() => setIsEditingName(false)} className="bg-gray-400 text-white px-2 py-1 rounded text-xs">✕</button>
               </div>
             ) : (
-              // 通常モード：名前と鉛筆ボタン
               <div className="flex items-center justify-end gap-2 mb-2">
                 <p className="text-gray-800 font-bold">{user.displayName}</p>
                 <button 
                   onClick={() => {
-                    setNewName(user.displayName); // 今の名前をセットしてから編集開始
+                    setNewName(user.displayName);
                     setIsEditingName(true);
                   }} 
                   className="text-gray-400 hover:text-blue-500"
@@ -182,7 +197,6 @@ export default function Home() {
             )}
             <button onClick={handleLogout} className="text-xs text-red-500 underline">ログアウト</button>
           </div>
-          {/* ▲▲▲ ここまで ▲▲▲ */}
         </div>
 
         <div className="mb-8 p-4 bg-gray-100 rounded-lg">
@@ -218,9 +232,8 @@ export default function Home() {
     );
   }
 
-  // チャット画面
   return (
-    <div className="p-6 max-w-2xl mx-auto pb-24">
+    <div className="p-6 max-w-2xl mx-auto pb-40"> {/* スタンプパネル分、下を空ける */}
       <div className="flex justify-between items-center mb-4 border-b pb-4 sticky top-0 bg-white z-10">
         <button 
           onClick={() => setCurrentRoom(null)}
@@ -240,7 +253,12 @@ export default function Home() {
               <p className="text-[10px] text-gray-400 ml-2">{formatDate(post.createdAt)}</p>
             </div>
             
-            <p className="text-gray-800 whitespace-pre-wrap">{post.text}</p>
+            {/* ▼ スタンプなら大きく、文字なら普通に表示する分岐処理 ▼ */}
+            {post.type === "stamp" ? (
+              <p className="text-6xl">{post.text}</p> // スタンプは超巨大に！
+            ) : (
+              <p className="text-gray-800 whitespace-pre-wrap">{post.text}</p>
+            )}
             
             <div className="flex justify-end mt-2 gap-2 items-center">
                <button onClick={() => handleLike(post.id, post.likes || 0)} className="text-pink-500 text-xs hover:bg-white rounded px-1">🩷 {post.likes || 0}</button>
@@ -253,19 +271,42 @@ export default function Home() {
       </div>
 
       <div className="fixed bottom-0 left-0 w-full bg-white border-t p-4">
-        <div className="max-w-2xl mx-auto flex gap-2">
-          <input
-            value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
-            className="flex-1 border p-2 rounded-lg text-black bg-gray-50"
-            placeholder="メッセージを入力..."
-          />
-          <button 
-            onClick={handleAddPost}
-            className="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold"
-          >
-            送信
-          </button>
+        <div className="max-w-2xl mx-auto">
+          {/* ▼ スタンプパネル（ボタンを押すと出現） ▼ */}
+          {showStamps && (
+            <div className="flex gap-4 mb-4 overflow-x-auto p-2 bg-gray-50 rounded-lg">
+              {STAMPS.map((stamp) => (
+                <button 
+                  key={stamp} 
+                  onClick={() => handleSendStamp(stamp)}
+                  className="text-4xl hover:bg-gray-200 rounded p-2 transition"
+                >
+                  {stamp}
+                </button>
+              ))}
+            </div>
+          )}
+
+          <div className="flex gap-2">
+            <button 
+              onClick={() => setShowStamps(!showStamps)} // パネルの開閉
+              className="bg-yellow-400 text-white px-3 rounded-lg text-xl"
+            >
+              ☺
+            </button>
+            <input
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              className="flex-1 border p-2 rounded-lg text-black bg-gray-50"
+              placeholder="メッセージを入力..."
+            />
+            <button 
+              onClick={handleAddPost}
+              className="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold"
+            >
+              送信
+            </button>
+          </div>
         </div>
       </div>
     </div>
