@@ -27,7 +27,6 @@ export default function RoomList({ user, rooms, setCurrentRoom, handleLogout }: 
   const [newIcon, setNewIcon] = useState("");
   const [isEditing, setIsEditing] = useState(false);
   
-  // ▼ フィルターモードに "dm" を追加
   const [filterMode, setFilterMode] = useState<"all" | "bookmarked" | "dm">("all");
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -40,7 +39,8 @@ export default function RoomList({ user, rooms, setCurrentRoom, handleLogout }: 
         createdBy: user.displayName,
         ownerId: user.uid,
         bookmarkedBy: [],
-        type: "public" // 通常の部屋は public
+        type: "public",
+        lastPostedAt: null // 作成時はまだ投稿なし
       });
       setNewRoomName("");
       alert("部屋を作成しました！");
@@ -96,29 +96,19 @@ export default function RoomList({ user, rooms, setCurrentRoom, handleLogout }: 
     }
   };
 
-  // ▼ 表示する部屋をフィルタリング
   const displayedRooms = rooms.filter((room) => {
-    // 検索条件
     const matchSearch = room.title.toLowerCase().includes(searchQuery.toLowerCase());
     if (!matchSearch) return false;
 
-    // --- タブごとの条件 ---
     if (filterMode === "dm") {
-      // DMタブ: タイプがdm かつ メンバーに自分がいる
       return room.type === "dm" && room.members?.includes(user.uid);
     } 
-    
     if (room.type === "dm") {
-      // 「すべて」や「お気に入り」タブには、DMを表示しない（隠す）
       return false;
     }
-
     if (filterMode === "bookmarked") {
-      // お気に入りタブ
       return room.bookmarkedBy?.includes(user.uid);
     }
-
-    // 「すべて」タブ（publicな部屋のみ）
     return true;
   });
 
@@ -126,7 +116,7 @@ export default function RoomList({ user, rooms, setCurrentRoom, handleLogout }: 
     <div className="p-10 max-w-2xl mx-auto">
       {/* ヘッダー */}
       <div className="flex justify-between items-start mb-8 border-b pb-4">
-        <h1 className="text-2xl font-bold mt-2">トークルーム一覧</h1>
+        <h1 className="text-2xl font-bold mt-2">スレッド一覧</h1>
         
         <div className="text-right">
           {isEditing ? (
@@ -160,7 +150,7 @@ export default function RoomList({ user, rooms, setCurrentRoom, handleLogout }: 
         </div>
       </div>
 
-      {/* 部屋作成フォーム（DMタブのときは隠すのが親切だが、今回はそのまま） */}
+      {/* 部屋作成フォーム */}
       {filterMode !== "dm" && (
         <div className="mb-8 p-4 bg-gray-100 rounded-lg">
           <h2 className="font-bold mb-2 text-black">新しい部屋を作る</h2>
@@ -179,25 +169,15 @@ export default function RoomList({ user, rooms, setCurrentRoom, handleLogout }: 
         </div>
       )}
 
-      {/* ▼ タブ切り替えボタン */}
+      {/* タブ切り替え */}
       <div className="flex gap-4 mb-4 border-b">
-        <button 
-          onClick={() => setFilterMode("all")}
-          className={`pb-2 px-2 ${filterMode === "all" ? "border-b-2 border-blue-500 font-bold text-blue-600" : "text-gray-400"}`}
-        >
+        <button onClick={() => setFilterMode("all")} className={`pb-2 px-2 ${filterMode === "all" ? "border-b-2 border-blue-500 font-bold text-blue-600" : "text-gray-400"}`}>
           すべて
         </button>
-        <button 
-          onClick={() => setFilterMode("bookmarked")}
-          className={`pb-2 px-2 ${filterMode === "bookmarked" ? "border-b-2 border-yellow-500 font-bold text-yellow-600" : "text-gray-400"}`}
-        >
+        <button onClick={() => setFilterMode("bookmarked")} className={`pb-2 px-2 ${filterMode === "bookmarked" ? "border-b-2 border-yellow-500 font-bold text-yellow-600" : "text-gray-400"}`}>
           お気に入り ★
         </button>
-        {/* DMタブを追加 */}
-        <button 
-          onClick={() => setFilterMode("dm")}
-          className={`pb-2 px-2 ${filterMode === "dm" ? "border-b-2 border-purple-500 font-bold text-purple-600" : "text-gray-400"}`}
-        >
+        <button onClick={() => setFilterMode("dm")} className={`pb-2 px-2 ${filterMode === "dm" ? "border-b-2 border-purple-500 font-bold text-purple-600" : "text-gray-400"}`}>
           DM 🔒
         </button>
       </div>
@@ -221,6 +201,14 @@ export default function RoomList({ user, rooms, setCurrentRoom, handleLogout }: 
           const isBookmarked = room.bookmarkedBy?.includes(user.uid);
           const isMyRoom = room.ownerId ? room.ownerId === user.uid : false;
 
+          // ▼ 未読バッジの判定ロジック
+          // 1. 部屋の最終投稿日時を取得 (Timestamp -> ミリ秒)
+          const lastPostedAt = room.lastPostedAt ? room.lastPostedAt.toMillis() : 0;
+          // 2. 自分が最後に見た時間をローカルストレージから取得
+          const lastReadAt = Number(localStorage.getItem(`lastRead_${room.id}`)) || 0;
+          // 3. 投稿の方が新しければ「未読」
+          const isUnread = lastPostedAt > lastReadAt;
+
           return (
             <div 
               key={room.id} 
@@ -230,18 +218,21 @@ export default function RoomList({ user, rooms, setCurrentRoom, handleLogout }: 
               `}
             >
               <div>
-                <h3 className={`text-xl font-bold group-hover:underline ${room.type === "dm" ? "text-purple-600" : "text-blue-600"}`}>
+                <h3 className={`text-xl font-bold group-hover:underline flex items-center ${room.type === "dm" ? "text-purple-600" : "text-blue-600"}`}>
                   {room.type === "dm" ? "🔒 " : "# "}
                   {room.title}
+                  
+                  {/* ▼ 未読の場合、赤い丸を表示！ */}
+                  {isUnread && (
+                    <span className="text-red-500 text-xs ml-2 animate-pulse">● New</span>
+                  )}
                 </h3>
-                {/* DMの場合は作成者を表示しない */}
                 {room.type !== "dm" && (
                   <p className="text-xs text-gray-400">作成者: {room.createdBy}</p>
                 )}
               </div>
 
               <div className="flex items-center gap-3">
-                {/* 自分の作った公開部屋なら削除可能 */}
                 {isMyRoom && room.type !== "dm" && (
                   <button 
                     onClick={(e) => handleDeleteRoom(e, room.id)}
@@ -252,7 +243,6 @@ export default function RoomList({ user, rooms, setCurrentRoom, handleLogout }: 
                   </button>
                 )}
                 
-                {/* DM以外ならブックマーク可能 */}
                 {room.type !== "dm" && (
                   <button 
                     onClick={(e) => handleBookmark(e, room)}
