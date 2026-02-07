@@ -77,6 +77,7 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
       text: inputText,
       author: user.displayName,
       uid: user.uid,
+      photoURL: user.photoURL,
       roomId: currentRoom.id,
       createdAt: new Date(),
       // likes: 0, ← これはもう使いません
@@ -91,6 +92,7 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
       text: stamp,
       author: user.displayName,
       uid: user.uid,
+      photoURL: user.photoURL,
       roomId: currentRoom.id,
       createdAt: new Date(),
       likedBy: [], // ★ここも変更
@@ -142,43 +144,57 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
 
       {/* タイムライン */}
       <div className="space-y-4">
-        {posts.map((post) => {
-          // ★自分がいいねしているか判定
+      {posts.map((post) => {
           const isLiked = post.likedBy ? post.likedBy.includes(user.uid) : false;
-          // ★いいねの数を計算 (古いデータのために post.likes も見てあげる)
           const likeCount = post.likedBy ? post.likedBy.length : (post.likes || 0);
 
           return (
-            <div key={post.id} className={`p-4 rounded-lg max-w-[80%] ${post.uid === user.uid ? "bg-blue-100 ml-auto" : "bg-gray-100"}`}>
-              <div className="flex justify-between items-end mb-1">
-                <p className="text-xs text-gray-500 font-bold">{post.author}</p>
-                <p className="text-[10px] text-gray-400 ml-2">{formatDate(post.createdAt)}</p>
-              </div>
+            // ▼ Flexの向きを調整して、アイコンと吹き出しを横並びにする
+            <div key={post.id} className={`flex gap-2 mb-4 max-w-[80%] ${post.uid === user.uid ? "ml-auto flex-row-reverse" : ""}`}>
               
-              {post.type === "stamp" ? (
-                <p className="text-6xl">{post.text}</p>
+              {/* ▼ アイコン画像を表示 (photoURLがある場合のみ) */}
+              {post.photoURL ? (
+                <img 
+                  src={post.photoURL} 
+                  alt="icon" 
+                  className="w-10 h-10 rounded-full border border-gray-300"
+                />
               ) : (
-                <p className="text-gray-800 whitespace-pre-wrap">{post.text}</p>
+                // アイコンがない場合のダミー（グレーの丸）
+                <div className="w-10 h-10 rounded-full bg-gray-300 flex-shrink-0"></div>
               )}
-              
-              <div className="flex justify-end mt-2 gap-2 items-center">
-                {/* いいねボタン */}
-                <button 
-                  onClick={() => handleLike(post)} 
-                  className={`text-xs rounded px-2 py-1 transition flex items-center gap-1 ${
-                    isLiked 
-                      ? "bg-pink-100 text-pink-500 font-bold border border-pink-200" // いいね済み：ピンク
-                      : "bg-white text-gray-400 border border-gray-200 hover:bg-gray-50" // 未いいね：白
-                  }`}
-                >
-                  {isLiked ? "❤️" : "🤍"} <span>{likeCount}</span>
-                </button>
 
-                {post.uid === user.uid && (
-                  <button onClick={() => handleDelete(post.id)} className="text-gray-400 text-xs hover:text-red-500 ml-2">
-                    🗑️
-                  </button>
+              {/* ▼ 吹き出しエリア (ここから下は以前の div の中身を少し整理) */}
+              <div className={`p-3 rounded-lg ${post.uid === user.uid ? "bg-blue-100" : "bg-gray-100"}`}>
+                <div className="flex justify-between items-end mb-1 min-w-[100px]">
+                  <p className="text-xs text-gray-500 font-bold">{post.author}</p>
+                  <p className="text-[10px] text-gray-400 ml-2">{formatDate(post.createdAt)}</p>
+                </div>
+                
+                {post.type === "stamp" ? (
+                  <p className="text-6xl">{post.text}</p>
+                ) : (
+                  <p className="text-gray-800 whitespace-pre-wrap">{post.text}</p>
                 )}
+                
+                <div className="flex justify-end mt-2 gap-2 items-center">
+                  <button 
+                    onClick={() => handleLike(post)} 
+                    className={`text-xs rounded px-2 py-1 transition flex items-center gap-1 ${
+                      isLiked 
+                        ? "bg-pink-100 text-pink-500 font-bold border border-pink-200"
+                        : "bg-white text-gray-400 border border-gray-200 hover:bg-gray-50"
+                    }`}
+                  >
+                    {isLiked ? "❤️" : "🤍"} <span>{likeCount}</span>
+                  </button>
+
+                  {post.uid === user.uid && (
+                    <button onClick={() => handleDelete(post.id)} className="text-gray-400 text-xs hover:text-red-500 ml-2">
+                      🗑️
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           );
