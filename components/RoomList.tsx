@@ -6,7 +6,6 @@ import { addDoc, collection } from "firebase/firestore";
 import { updateProfile } from "firebase/auth";
 import { auth, db } from "../firebaseConfig";
 
-// 親(page.tsx)から受け取るデータの形を定義
 type Props = {
   user: any;
   rooms: any[];
@@ -14,10 +13,19 @@ type Props = {
   handleLogout: () => void;
 };
 
+// ランダムなアバター画像のURLを作る関数
+const getRandomAvatar = () => {
+  const randomSeed = Math.random().toString(36).substring(7);
+  return `https://api.dicebear.com/7.x/notionists/svg?seed=${randomSeed}`;
+};
+
 export default function RoomList({ user, rooms, setCurrentRoom, handleLogout }: Props) {
   const [newRoomName, setNewRoomName] = useState("");
+  
+  // 編集用のステート
   const [newName, setNewName] = useState("");
-  const [isEditingName, setIsEditingName] = useState(false);
+  const [newIcon, setNewIcon] = useState(""); // 新しいアイコンURLの一時保存場所
+  const [isEditing, setIsEditing] = useState(false);
 
   // 部屋作成
   const handleCreateRoom = async () => {
@@ -35,49 +43,97 @@ export default function RoomList({ user, rooms, setCurrentRoom, handleLogout }: 
     }
   };
 
-  // 名前変更
-  const handleUpdateName = async () => {
+  // プロフィール更新（名前とアイコン）
+  const handleUpdateProfile = async () => {
     if (!newName || !auth.currentUser) return;
     try {
-      await updateProfile(auth.currentUser, { displayName: newName });
+      await updateProfile(auth.currentUser, { 
+        displayName: newName,
+        photoURL: newIcon // アイコンも更新！
+      });
       await auth.currentUser.reload();
-      window.location.reload(); // 名前変更を反映させるためリロード
+      window.location.reload(); 
     } catch (error) {
       console.error(error);
     }
+  };
+
+  // 編集モードを開始する時の処理
+  const startEditing = () => {
+    setNewName(user.displayName || "");
+    // 今のアイコンがあればそれを、なければランダムなものをセット
+    setNewIcon(user.photoURL || getRandomAvatar());
+    setIsEditing(true);
   };
 
   return (
     <div className="p-10 max-w-2xl mx-auto">
       <div className="flex justify-between items-start mb-8 border-b pb-4">
         <h1 className="text-2xl font-bold mt-2">スレッド一覧</h1>
+        
         <div className="text-right">
-          {isEditingName ? (
-            <div className="flex items-center justify-end gap-2 mb-2">
-              <input 
-                type="text" 
-                value={newName} 
-                onChange={(e) => setNewName(e.target.value)} 
-                className="border p-1 text-sm rounded text-black w-32 bg-white"
-              />
-              <button onClick={handleUpdateName} className="bg-blue-500 text-white px-2 py-1 rounded text-xs whitespace-nowrap">保存</button>
-              <button onClick={() => setIsEditingName(false)} className="bg-gray-400 text-white px-2 py-1 rounded text-xs">✕</button>
+          {isEditing ? (
+            // ▼▼▼ 編集モード ▼▼▼
+            <div className="flex flex-col items-end gap-2 mb-2">
+              <div className="flex items-center gap-2">
+                {/* アイコンプレビュー */}
+                <img 
+                  src={newIcon} 
+                  alt="New Icon" 
+                  className="w-10 h-10 rounded-full border border-gray-300 bg-white"
+                />
+                {/* サイコロボタン（ランダム生成） */}
+                <button 
+                  onClick={() => setNewIcon(getRandomAvatar())}
+                  className="bg-yellow-400 text-white w-8 h-8 rounded-full text-lg hover:bg-yellow-500 transition"
+                  title="別のアイコンにする"
+                >
+                  🎲
+                </button>
+                
+                <input 
+                  type="text" 
+                  value={newName} 
+                  onChange={(e) => setNewName(e.target.value)} 
+                  className="border p-1 text-sm rounded text-black w-32 bg-white"
+                />
+              </div>
+              <div className="flex gap-2">
+                <button onClick={handleUpdateProfile} className="bg-blue-500 text-white px-3 py-1 rounded text-xs">保存</button>
+                <button onClick={() => setIsEditing(false)} className="bg-gray-400 text-white px-3 py-1 rounded text-xs">キャンセル</button>
+              </div>
             </div>
           ) : (
-            <div className="flex items-center justify-end gap-2 mb-2">
-              <p className="text-gray-800 font-bold">{user.displayName}</p>
-              <button 
-                onClick={() => {
-                  setNewName(user.displayName);
-                  setIsEditingName(true);
-                }} 
-                className="text-gray-400 hover:text-blue-500"
-              >
-                ✎
-              </button>
+            // ▼▼▼ 通常モード ▼▼▼
+            <div className="flex items-center justify-end gap-3 mb-2">
+              {/* 現在のアイコン表示 */}
+              {user.photoURL ? (
+                <img 
+                  src={user.photoURL} 
+                  alt="My Icon" 
+                  className="w-10 h-10 rounded-full border border-gray-300 bg-white"
+                />
+              ) : (
+                <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-xs text-gray-500">
+                  No img
+                </div>
+              )}
+
+              <div className="flex items-center gap-2">
+                <p className="text-gray-800 font-bold">{user.displayName}</p>
+                <button 
+                  onClick={startEditing} 
+                  className="text-gray-400 hover:text-blue-500"
+                >
+                  ✎
+                </button>
+              </div>
             </div>
           )}
-          <button onClick={handleLogout} className="text-xs text-red-500 underline">ログアウト</button>
+          
+          {!isEditing && (
+            <button onClick={handleLogout} className="text-xs text-red-500 underline">ログアウト</button>
+          )}
         </div>
       </div>
 
