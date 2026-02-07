@@ -5,7 +5,7 @@ import { useState, useEffect, useRef } from "react";
 import { 
   collection, addDoc, query, orderBy, onSnapshot,
   deleteDoc, doc, updateDoc, where,
-  arrayUnion, arrayRemove // ← ★これらを追加！
+  arrayUnion, arrayRemove
 } from "firebase/firestore"; 
 import { db } from "../firebaseConfig";
 
@@ -80,8 +80,7 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
       photoURL: user.photoURL,
       roomId: currentRoom.id,
       createdAt: new Date(),
-      // likes: 0, ← これはもう使いません
-      likedBy: [], // ★代わりに「誰がいいねしたかリスト」を作る
+      likedBy: [],
       type: "text"
     });
     setInputText("");
@@ -95,7 +94,7 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
       photoURL: user.photoURL,
       roomId: currentRoom.id,
       createdAt: new Date(),
-      likedBy: [], // ★ここも変更
+      likedBy: [],
       type: "stamp"
     });
     setShowStamps(false);
@@ -106,25 +105,15 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
     await deleteDoc(doc(db, "posts", id));
   };
 
-  // ▼ いいねのロジックを大改造！
   const handleLike = async (post: any) => {
-    // 昔の投稿データなどでlikedByがない場合は空配列として扱う
     const currentLikedBy = post.likedBy || [];
-    
-    // すでに自分がいいねしているかチェック
     const isLiked = currentLikedBy.includes(user.uid);
     const postRef = doc(db, "posts", post.id);
 
     if (isLiked) {
-      // 既にいいね済みなら → 解除する（配列から削除）
-      await updateDoc(postRef, {
-        likedBy: arrayRemove(user.uid)
-      });
+      await updateDoc(postRef, { likedBy: arrayRemove(user.uid) });
     } else {
-      // まだなら → いいねする（配列に追加）
-      await updateDoc(postRef, {
-        likedBy: arrayUnion(user.uid)
-      });
+      await updateDoc(postRef, { likedBy: arrayUnion(user.uid) });
     }
   };
 
@@ -149,10 +138,9 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
           const likeCount = post.likedBy ? post.likedBy.length : (post.likes || 0);
 
           return (
-            // ▼ Flexの向きを調整して、アイコンと吹き出しを横並びにする
             <div key={post.id} className={`flex gap-2 mb-4 max-w-[80%] ${post.uid === user.uid ? "ml-auto flex-row-reverse" : ""}`}>
               
-              {/* ▼ アイコン画像を表示 (photoURLがある場合のみ) */}
+              {/* アイコン画像 */}
               {post.photoURL ? (
                 <img 
                   src={post.photoURL} 
@@ -160,11 +148,10 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
                   className="w-10 h-10 rounded-full border border-gray-300"
                 />
               ) : (
-                // アイコンがない場合のダミー（グレーの丸）
                 <div className="w-10 h-10 rounded-full bg-gray-300 flex-shrink-0"></div>
               )}
 
-              {/* ▼ 吹き出しエリア (ここから下は以前の div の中身を少し整理) */}
+              {/* 吹き出しエリア */}
               <div className={`p-3 rounded-lg ${post.uid === user.uid ? "bg-blue-100" : "bg-gray-100"}`}>
                 <div className="flex justify-between items-end mb-1 min-w-[100px]">
                   <p className="text-xs text-gray-500 font-bold">{post.author}</p>
@@ -220,28 +207,31 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
             </div>
           )}
 
-          <div className="flex gap-2">
+          <div className="flex gap-2 items-end">
             <button 
               onClick={() => setShowStamps(!showStamps)}
-              className="bg-yellow-400 text-white px-3 rounded-lg text-xl"
+              className="bg-yellow-400 text-white px-3 py-2 rounded-lg text-xl mb-1"
             >
               ☺
             </button>
-            <input
+            
+            <textarea
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
-              className="flex-1 border p-2 rounded-lg text-black bg-gray-50"
+              className="flex-1 border p-2 rounded-lg text-black bg-gray-50 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
               placeholder="メッセージを入力..."
+              rows={2}
             />
+            
             <button 
               onClick={handleAddPost}
-              className="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold"
+              className="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold mb-1"
             >
               送信
             </button>
           </div>
         </div>
       </div>
-    </div>
+    </div> 
   );
 }
