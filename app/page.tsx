@@ -41,6 +41,8 @@ export default function Home() {
   const [showStamps, setShowStamps] = useState(false);
 
   const scrollBottomRef = useRef<HTMLDivElement>(null);
+  const prevPostsLength = useRef(0);
+  const isRoomChanged = useRef(false);
 
   useEffect(() => {
     const unsubscribeAuth = auth.onAuthStateChanged((u) => setUser(u));
@@ -67,12 +69,28 @@ export default function Home() {
     return () => unsubscribePosts();
   }, [currentRoom]);
 
+// A. 部屋が変わったら「次は絶対にスクロールするぞ！」とフラグを立てる
   useEffect(() => {
-    if (scrollBottomRef.current) {
-      scrollBottomRef.current.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [posts.length, currentRoom]);
+    isRoomChanged.current = true;
+  }, [currentRoom]);
 
+  // B. 投稿数が変わった時の処理
+  useEffect(() => {
+    if (posts.length === 0) return; // 投稿がない時は何もしない
+
+    const currentLength = posts.length;
+    const prevLength = prevPostsLength.current;
+
+    // 「部屋移動直後」または「投稿が増えた時」だけスクロールする
+    // (削除して減った時はスクロールしない！)
+    if (isRoomChanged.current || currentLength > prevLength) {
+      scrollBottomRef.current?.scrollIntoView({ behavior: "smooth" });
+      isRoomChanged.current = false; // フラグを戻す
+    }
+
+    // 今の長さを「前回」として保存
+    prevPostsLength.current = currentLength;
+  }, [posts.length]); // 投稿数が変わるたびにチェック
   const handleLogin = async () => {
     try {
       await signInWithPopup(auth, new GoogleAuthProvider());
