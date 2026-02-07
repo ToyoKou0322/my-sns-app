@@ -5,7 +5,7 @@ import { useState, useEffect, useRef } from "react";
 import { 
   collection, addDoc, query, orderBy, onSnapshot,
   deleteDoc, doc, updateDoc, where, getDoc, setDoc,
-  arrayUnion, arrayRemove, serverTimestamp // ← serverTimestampを追加
+  arrayUnion, arrayRemove, serverTimestamp
 } from "firebase/firestore"; 
 import { db } from "../firebaseConfig";
 
@@ -32,17 +32,20 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
   const [posts, setPosts] = useState<any[]>([]);
   const [inputText, setInputText] = useState("");
   const [showStamps, setShowStamps] = useState(false);
+  
+  // ▼ 送信中かどうかを管理するフラグ
+  const [isSending, setIsSending] = useState(false);
 
   const scrollBottomRef = useRef<HTMLDivElement>(null);
   const prevPostsLength = useRef(0);
   const isRoomChanged = useRef(false);
 
-  // ▼ 1. 部屋に入っている間、投稿が増えるたびに「最後に見た時間」を更新！
+  // 1. 部屋に入っている間、投稿が増えるたびに「最後に見た時間」を更新
   useEffect(() => {
-    // 自分のPC時計が少し遅れていても大丈夫なように、+5秒(5000ミリ秒)おまけする
-    const safeReadTime = Date.now() + 5000; 
+    // 自分の投稿でNewがつかないよう、少し未来の時間(+5秒)を保存
+    const safeReadTime = Date.now() + 5000;
     localStorage.setItem(`lastRead_${currentRoom.id}`, safeReadTime.toString());
-  }, [currentRoom.id, posts]);
+  }, [currentRoom.id, posts]); 
 
   // 2. 投稿データの監視
   useEffect(() => {
@@ -77,46 +80,62 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
 
   // --- アクション ---
   const handleAddPost = async () => {
-    if (inputText === "") return;
+    // 空文字または「送信中」なら何もしない（連打防止）
+    if (inputText === "" || isSending) return;
     
-    // 投稿を追加
-    await addDoc(collection(db, "posts"), {
-      text: inputText,
-      author: user.displayName,
-      uid: user.uid,
-      photoURL: user.photoURL,
-      roomId: currentRoom.id,
-      createdAt: new Date(),
-      likedBy: [],
-      type: "text"
-    });
+    setIsSending(true); // 送信開始！ロックをかける
 
-    // ▼ 部屋の「最終投稿日時」を更新！
-    await updateDoc(doc(db, "rooms", currentRoom.id), {
-      lastPostedAt: serverTimestamp()
-    });
+    try {
+      await addDoc(collection(db, "posts"), {
+        text: inputText,
+        author: user.displayName,
+        uid: user.uid,
+        photoURL: user.photoURL,
+        roomId: currentRoom.id,
+        createdAt: new Date(),
+        likedBy: [],
+        type: "text"
+      });
 
-    setInputText("");
+      await updateDoc(doc(db, "rooms", currentRoom.id), {
+        lastPostedAt: serverTimestamp()
+      });
+
+      setInputText("");
+    } catch (error) {
+      console.error(error);
+      alert("送信に失敗しました");
+    } finally {
+      setIsSending(false); // 送信終了！ロック解除
+    }
   };
 
   const handleSendStamp = async (stamp: string) => {
-    await addDoc(collection(db, "posts"), {
-      text: stamp,
-      author: user.displayName,
-      uid: user.uid,
-      photoURL: user.photoURL,
-      roomId: currentRoom.id,
-      createdAt: new Date(),
-      likedBy: [],
-      type: "stamp"
-    });
+    if (isSending) return; // スタンプも連打防止
+    setIsSending(true);
 
-    // ▼ 部屋の「最終投稿日時」を更新！
-    await updateDoc(doc(db, "rooms", currentRoom.id), {
-      lastPostedAt: serverTimestamp()
-    });
+    try {
+      await addDoc(collection(db, "posts"), {
+        text: stamp,
+        author: user.displayName,
+        uid: user.uid,
+        photoURL: user.photoURL,
+        roomId: currentRoom.id,
+        createdAt: new Date(),
+        likedBy: [],
+        type: "stamp"
+      });
 
-    setShowStamps(false);
+      await updateDoc(doc(db, "rooms", currentRoom.id), {
+        lastPostedAt: serverTimestamp()
+      });
+
+      setShowStamps(false);
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setIsSending(false);
+    }
   };
   
   const handleDelete = async (id: string) => {
@@ -155,7 +174,7 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
           members: memberIds,
           type: "dm",
           ownerId: user.uid,
-          lastPostedAt: serverTimestamp() // DM作成時も時間を記録
+          lastPostedAt: serverTimestamp() 
         });
       }
       const roomData = { 
@@ -163,8 +182,9 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
         title: roomSnap.exists() ? roomSnap.data().title : `DM: ${user.displayName} & ${targetUser.author}`,
         type: "dm"
       };
-      // DMに入る時も既読にする
-      localStorage.setItem(`lastRead_${dmRoomId}`, Date.now().toString());
+      // DMに入る時も既読にする(+5秒バッファ)
+      const safeReadTime = Date.now() + 5000;
+      localStorage.setItem(`lastRead_${dmRoomId}`, safeReadTime.toString());
       setCurrentRoom(roomData);
 
     } catch (error) {
@@ -240,7 +260,15 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
           <div className="flex gap-2 items-end">
             <button onClick={() => setShowStamps(!showStamps)} className="bg-yellow-400 text-white px-3 py-2 rounded-lg text-xl mb-1">☺</button>
             <textarea value={inputText} onChange={(e) => setInputText(e.target.value)} className="flex-1 border p-2 rounded-lg text-black bg-gray-50 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="メッセージを入力..." rows={2}/>
-            <button onClick={handleAddPost} className="bg-blue-600 text-white px-6 py-2 rounded-lg font-bold mb-1">送信</button>
+            
+            {/* ▼ 送信ボタンの制御を追加 */}
+            <button 
+              onClick={handleAddPost}
+              disabled={isSending} // 送信中は無効化
+              className={`${isSending ? "bg-gray-400 cursor-not-allowed" : "bg-blue-600"} text-white px-6 py-2 rounded-lg font-bold mb-1`}
+            >
+              {isSending ? "..." : "送信"}
+            </button>
           </div>
         </div>
       </div>
