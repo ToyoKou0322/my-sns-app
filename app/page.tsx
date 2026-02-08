@@ -5,7 +5,6 @@ import { collection, query, orderBy, onSnapshot } from "firebase/firestore";
 import { signOut } from "firebase/auth";
 import { auth, db } from "../firebaseConfig";
 
-// ▼ 作った部品たちを読み込む
 import Login from "../components/Login";
 import RoomList from "../components/RoomList";
 import ChatRoom from "../components/ChatRoom";
