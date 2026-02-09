@@ -8,7 +8,7 @@ import {
   arrayUnion, arrayRemove, serverTimestamp
 } from "firebase/firestore"; 
 import { db } from "../firebaseConfig";
-import UrlPreview from "./UrlPreview"; // ← ★追加
+import UrlPreview from "./UrlPreview"; 
 
 const STAMPS = ["👍", "🎉", "😂", "🙏", "❤️", "😭"];
 
@@ -43,11 +43,13 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
   const isRoomChanged = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // 1. 既読管理
   useEffect(() => {
     const safeReadTime = Date.now() + 5000;
     localStorage.setItem(`lastRead_${currentRoom.id}`, safeReadTime.toString());
   }, [currentRoom.id, posts]); 
 
+  // 2. 投稿データの監視
   useEffect(() => {
     const q = query(
       collection(db, "posts"), 
@@ -60,10 +62,12 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
     return () => unsubscribe();
   }, [currentRoom]);
 
+  // 3. 部屋変更フラグ
   useEffect(() => {
     isRoomChanged.current = true;
   }, [currentRoom]);
 
+  // 4. 自動スクロール制御
   useEffect(() => {
     if (posts.length === 0) return;
     const currentLength = posts.length;
@@ -76,6 +80,7 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
     prevPostsLength.current = currentLength;
   }, [posts.length]);
 
+  // ▼ 画像圧縮関数
   const compressImage = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -99,6 +104,8 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
       reader.onerror = (error) => reject(error);
     });
   };
+
+  // --- アクション ---
 
   const handleAddPost = async () => {
     if (inputText === "" || isSending) return;
@@ -223,14 +230,9 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
     }
   };
 
-  // ▼ テキスト内のURLをリンクにして、プレビュー用のURLを見つける関数
   const renderTextWithLinks = (text: string) => {
-    // 1. URLが含まれているかチェック
     const urls = text.match(URL_REGEX);
-    // 2. 最初のURLだけプレビュー表示用に取得 (複数あると邪魔なので)
     const firstUrl = urls ? urls[0] : null;
-
-    // 3. テキストをURLで分割して、リンクタグに置き換える
     const parts = text.split(URL_REGEX);
     
     return (
@@ -244,8 +246,6 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
             ) : part
           )}
         </p>
-        
-        {/* ▼ URLが見つかったらプレビューを表示 */}
         {firstUrl && <UrlPreview url={firstUrl} />}
       </>
     );
@@ -270,14 +270,21 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
           const likeCount = post.likedBy ? post.likedBy.length : (post.likes || 0);
 
           return (
-            <div key={post.id} className={`flex gap-2 mb-4 max-w-[80%] ${post.uid === user.uid ? "ml-auto flex-row-reverse" : ""}`}>
-              <div className="cursor-pointer hover:opacity-80" onClick={() => handleStartDM(post)} title="クリックしてDMを送る">
+            <div key={post.id} className={`flex gap-2 mb-4 max-w-[80%] items-start ${post.uid === user.uid ? "ml-auto flex-row-reverse" : ""}`}>
+              
+              {/* アイコン表示部分 */}
+              <div 
+                className="cursor-pointer hover:opacity-80 flex-shrink-0" 
+                onClick={() => handleStartDM(post)} 
+                title="クリックしてDMを送る"
+              >
                 {post.photoURL ? (
                   <img src={post.photoURL} alt="icon" className="w-10 h-10 rounded-full border border-gray-300 object-cover"/>
                 ) : (
                   <div className="w-10 h-10 rounded-full bg-gray-300 flex-shrink-0"></div>
                 )}
               </div>
+
               <div className={`p-3 rounded-lg ${post.uid === user.uid ? "bg-blue-100" : "bg-gray-100"}`}>
                 <div className="flex justify-between items-end mb-1 min-w-[100px]">
                   <p className="text-xs text-gray-500 font-bold cursor-pointer hover:underline" onClick={() => handleStartDM(post)}>
@@ -286,7 +293,6 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
                   <p className="text-[10px] text-gray-400 ml-2">{formatDate(post.createdAt)}</p>
                 </div>
                 
-                {/* ▼ 表示処理の分岐 ▼ */}
                 {post.type === "stamp" ? (
                   <p className="text-6xl">{post.text}</p>
                 ) : post.type === "image" ? (
@@ -297,7 +303,6 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
                     onClick={() => window.open(post.text, '_blank')} 
                   />
                 ) : (
-                  // ★ ここで新しい関数を使う
                   renderTextWithLinks(post.text)
                 )}
                 
