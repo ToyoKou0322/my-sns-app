@@ -3,11 +3,11 @@
 
 import { useState } from "react";
 import { 
-  addDoc, collection, doc, updateDoc, deleteDoc,
+  addDoc, collection, doc, updateDoc, deleteDoc, setDoc, // ← setDocを追加
   arrayUnion, arrayRemove
 } from "firebase/firestore";
 import { updateProfile } from "firebase/auth";
-import { auth, db } from "../firebaseConfig";
+import { auth, db } from "../firebaseConfig"; // storageは不要
 
 type Props = {
   user: any;
@@ -18,7 +18,7 @@ type Props = {
 
 const getRandomAvatar = () => {
   const randomSeed = Math.random().toString(36).substring(7);
-  return `https://api.dicebear.com/7.x/pixel-art/svg?seed=${randomSeed}`;
+  return `https://api.dicebear.com/7.x/thumbs/svg?seed=${randomSeed}`;
 };
 
 export default function RoomList({ user, rooms, setCurrentRoom, handleLogout }: Props) {
@@ -26,7 +26,8 @@ export default function RoomList({ user, rooms, setCurrentRoom, handleLogout }: 
   const [newName, setNewName] = useState("");
   const [newIcon, setNewIcon] = useState("");
   const [isEditing, setIsEditing] = useState(false);
-  
+  const [isUploading, setIsUploading] = useState(false);
+
   const [filterMode, setFilterMode] = useState<"all" | "bookmarked" | "dm">("all");
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -40,7 +41,7 @@ export default function RoomList({ user, rooms, setCurrentRoom, handleLogout }: 
         ownerId: user.uid,
         bookmarkedBy: [],
         type: "public",
-        lastPostedAt: null // 作成時はまだ投稿なし
+        lastPostedAt: null 
       });
       setNewRoomName("");
       alert("部屋を作成しました！");
@@ -63,17 +64,32 @@ export default function RoomList({ user, rooms, setCurrentRoom, handleLogout }: 
     }
   };
 
+  // ▼ プロフィール更新処理（ここを大きく変更！）
   const handleUpdateProfile = async () => {
     if (!newName || !auth.currentUser) return;
     try {
+      // 1. 名前だけはAuthプロフィールに保存（これは今まで通り）
       await updateProfile(auth.currentUser, { 
-        displayName: newName,
-        photoURL: newIcon
+        displayName: newName
+        // photoURLは文字数制限でエラーになるのでここでは保存しない！
       });
-      await auth.currentUser.reload();
-      window.location.reload(); 
+
+      // 2. 画像データと名前を「users」コレクション（データベース）に保存
+      //    ここなら1MBまで入るので、Base64画像も余裕で入ります
+      await setDoc(doc(db, "users", auth.currentUser.uid), {
+        displayName: newName,
+        photoURL: newIcon, // ← ここに長い画像データを保存
+        uid: auth.currentUser.uid
+      }, { merge: true }); // merge: true は、既存データを消さずに上書きする設定
+
+      alert("プロフィールを更新しました！");
+      setIsEditing(false);
+      
+      // 画面を更新するためにリロードしてもいいですが、
+      // page.tsxの監視機能で自動更新されるのでそのままでもOK
     } catch (error) {
-      console.error(error);
+      console.error("Update Error:", error);
+      alert("更新に失敗しました");
     }
   };
 
@@ -96,25 +112,58 @@ export default function RoomList({ user, rooms, setCurrentRoom, handleLogout }: 
     }
   };
 
+  const compressImage = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = (event) => {
+        const img = new Image();
+        img.src = event.target?.result as string;
+        img.onload = () => {
+          const canvas = document.createElement("canvas");
+          const MAX_WIDTH = 150;
+          const scaleSize = MAX_WIDTH / img.width;
+          canvas.width = MAX_WIDTH;
+          canvas.height = img.height * scaleSize;
+          const ctx = canvas.getContext("2d");
+          ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
+          // 画質を0.7にして容量を節約
+          const dataUrl = canvas.toDataURL("image/jpeg", 0.7);
+          resolve(dataUrl);
+        };
+        img.onerror = (error) => reject(error);
+      };
+      reader.onerror = (error) => reject(error);
+    });
+  };
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploading(true);
+    try {
+      const base64String = await compressImage(file);
+      setNewIcon(base64String);
+    } catch (error) {
+      console.error("Image Error:", error);
+      alert("画像の処理に失敗しました");
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
   const displayedRooms = rooms.filter((room) => {
     const matchSearch = room.title.toLowerCase().includes(searchQuery.toLowerCase());
     if (!matchSearch) return false;
-
-    if (filterMode === "dm") {
-      return room.type === "dm" && room.members?.includes(user.uid);
-    } 
-    if (room.type === "dm") {
-      return false;
-    }
-    if (filterMode === "bookmarked") {
-      return room.bookmarkedBy?.includes(user.uid);
-    }
+    if (filterMode === "dm") return room.type === "dm" && room.members?.includes(user.uid);
+    if (room.type === "dm") return false;
+    if (filterMode === "bookmarked") return room.bookmarkedBy?.includes(user.uid);
     return true;
   });
 
   return (
     <div className="p-10 max-w-2xl mx-auto">
-      {/* ヘッダー */}
       <div className="flex justify-between items-start mb-8 border-b pb-4">
         <h1 className="text-2xl font-bold mt-2">トークルーム一覧</h1>
         
@@ -122,19 +171,43 @@ export default function RoomList({ user, rooms, setCurrentRoom, handleLogout }: 
           {isEditing ? (
             <div className="flex flex-col items-end gap-2 mb-2">
               <div className="flex items-center gap-2">
-                <img src={newIcon} alt="New Icon" className="w-10 h-10 rounded-full border border-gray-300 bg-white"/>
-                <button onClick={() => setNewIcon(getRandomAvatar())} className="bg-yellow-400 text-white w-8 h-8 rounded-full text-lg hover:bg-yellow-500 transition">🎲</button>
-                <input type="text" value={newName} onChange={(e) => setNewName(e.target.value)} className="border p-1 text-sm rounded text-black w-32 bg-white"/>
+                <img 
+                  src={newIcon} 
+                  alt="New Icon" 
+                  className="w-16 h-16 rounded-full border border-gray-300 bg-white object-cover"
+                />
+                
+                <div className="flex flex-col gap-2">
+                   <label className={`bg-gray-200 text-gray-700 px-2 py-1 rounded text-xs cursor-pointer hover:bg-gray-300 text-center ${isUploading ? "opacity-50 cursor-not-allowed" : ""}`}>
+                     {isUploading ? "処理中..." : "📁 画像を選択"}
+                     <input 
+                       type="file" 
+                       accept="image/*" 
+                       onChange={handleImageUpload} 
+                       className="hidden"
+                       disabled={isUploading}
+                     />
+                   </label>
+
+                   <button 
+                      onClick={() => setNewIcon(getRandomAvatar())} 
+                      className="text-xs text-blue-500 underline"
+                    >
+                      またはランダム生成
+                    </button>
+                  
+                  <input type="text" value={newName} onChange={(e) => setNewName(e.target.value)} className="border p-1 text-sm rounded text-black w-32 bg-white"/>
+                </div>
               </div>
-              <div className="flex gap-2">
-                <button onClick={handleUpdateProfile} className="bg-blue-500 text-white px-3 py-1 rounded text-xs">保存</button>
+              <div className="flex gap-2 mt-2">
+                <button onClick={handleUpdateProfile} className="bg-blue-500 text-white px-3 py-1 rounded text-xs" disabled={isUploading}>保存</button>
                 <button onClick={() => setIsEditing(false)} className="bg-gray-400 text-white px-3 py-1 rounded text-xs">キャンセル</button>
               </div>
             </div>
           ) : (
             <div className="flex items-center justify-end gap-3 mb-2">
               {user.photoURL ? (
-                <img src={user.photoURL} alt="My Icon" className="w-10 h-10 rounded-full border border-gray-300 bg-white"/>
+                <img src={user.photoURL} alt="My Icon" className="w-10 h-10 rounded-full border border-gray-300 bg-white object-cover"/>
               ) : (
                 <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-xs text-gray-500">No img</div>
               )}
@@ -150,7 +223,6 @@ export default function RoomList({ user, rooms, setCurrentRoom, handleLogout }: 
         </div>
       </div>
 
-      {/* 部屋作成フォーム */}
       {filterMode !== "dm" && (
         <div className="mb-8 p-4 bg-gray-100 rounded-lg">
           <h2 className="font-bold mb-2 text-black">新しい部屋を作る</h2>
@@ -169,7 +241,6 @@ export default function RoomList({ user, rooms, setCurrentRoom, handleLogout }: 
         </div>
       )}
 
-      {/* タブ切り替え */}
       <div className="flex gap-4 mb-4 border-b">
         <button onClick={() => setFilterMode("all")} className={`pb-2 px-2 ${filterMode === "all" ? "border-b-2 border-blue-500 font-bold text-blue-600" : "text-gray-400"}`}>
           すべて
@@ -195,18 +266,12 @@ export default function RoomList({ user, rooms, setCurrentRoom, handleLogout }: 
         </div>
       </div>
 
-      {/* 部屋リスト表示 */}
       <div className="grid gap-4">
         {displayedRooms.map((room) => {
           const isBookmarked = room.bookmarkedBy?.includes(user.uid);
           const isMyRoom = room.ownerId ? room.ownerId === user.uid : false;
-
-          // ▼ 未読バッジの判定ロジック
-          // 1. 部屋の最終投稿日時を取得 (Timestamp -> ミリ秒)
           const lastPostedAt = room.lastPostedAt ? room.lastPostedAt.toMillis() : 0;
-          // 2. 自分が最後に見た時間をローカルストレージから取得
           const lastReadAt = Number(localStorage.getItem(`lastRead_${room.id}`)) || 0;
-          // 3. 投稿の方が新しければ「未読」
           const isUnread = lastPostedAt > lastReadAt;
 
           return (
@@ -221,8 +286,6 @@ export default function RoomList({ user, rooms, setCurrentRoom, handleLogout }: 
                 <h3 className={`text-xl font-bold group-hover:underline flex items-center ${room.type === "dm" ? "text-purple-600" : "text-blue-600"}`}>
                   {room.type === "dm" ? "🔒 " : "# "}
                   {room.title}
-                  
-                  {/* ▼ 未読の場合、赤い丸を表示！ */}
                   {isUnread && (
                     <span className="text-red-500 text-xs ml-2 animate-pulse">● New</span>
                   )}
@@ -242,7 +305,6 @@ export default function RoomList({ user, rooms, setCurrentRoom, handleLogout }: 
                     🗑️
                   </button>
                 )}
-                
                 {room.type !== "dm" && (
                   <button 
                     onClick={(e) => handleBookmark(e, room)}
@@ -256,7 +318,6 @@ export default function RoomList({ user, rooms, setCurrentRoom, handleLogout }: 
             </div>
           );
         })}
-        
         {displayedRooms.length === 0 && (
           <p className="text-gray-400 py-4 text-center">
             {filterMode === "dm" ? "DMの履歴はありません。" : "部屋がありません。"}

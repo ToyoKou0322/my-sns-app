@@ -1,10 +1,11 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { collection, query, orderBy, onSnapshot } from "firebase/firestore"; 
+import { collection, query, orderBy, onSnapshot, doc } from "firebase/firestore"; 
 import { signOut } from "firebase/auth";
 import { auth, db } from "../firebaseConfig";
 
+// ▼ 作った部品たちを読み込む
 import Login from "../components/Login";
 import RoomList from "../components/RoomList";
 import ChatRoom from "../components/ChatRoom";
@@ -14,15 +15,41 @@ export default function Home() {
   const [rooms, setRooms] = useState<any[]>([]);
   const [currentRoom, setCurrentRoom] = useState<any>(null);
 
-  // 1. ユーザー監視
+  // 1. ユーザー監視（ここをより強力に修正！）
   useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged((u) => setUser(u));
-    return () => unsubscribe();
+    const unsubscribeAuth = auth.onAuthStateChanged((u) => {
+      if (u) {
+        // まずAuthの基本情報だけでセットしておく
+        // (これをしないとデータベース読み込み完了まで一瞬消えてしまうため)
+        setUser(u); 
+
+        // データベース(usersコレクション)の最新情報を監視する
+        const userRef = doc(db, "users", u.uid);
+        const unsubscribeUser = onSnapshot(userRef, (docSnapshot) => {
+          if (docSnapshot.exists()) {
+            const userData = docSnapshot.data();
+            
+            // ★ここが重要：Authの情報(u)と、DBの情報(userData)を合体させる
+            // DBに photoURL があれば、それを優先して使う！
+            setUser({
+              uid: u.uid,
+              email: u.email,
+              displayName: userData.displayName || u.displayName,
+              photoURL: userData.photoURL || u.photoURL, // ← ここでDBの画像を優先
+            });
+          }
+        });
+        
+        return () => unsubscribeUser();
+      } else {
+        setUser(null);
+      }
+    });
+    return () => unsubscribeAuth();
   }, []);
 
   // 2. 部屋リスト監視
   useEffect(() => {
-    // ログインしていない時はエラーになるので監視しない
     if (!user) return;
 
     const q = query(collection(db, "rooms"), orderBy("createdAt", "desc"));
@@ -30,7 +57,7 @@ export default function Home() {
       setRooms(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
     });
     return () => unsubscribe();
-  }, [user]); // ← ★「user」が変わるたびに、つなぎ直すように指示します
+  }, [user]);
 
   // 3. ログアウト処理
   const handleLogout = async () => {

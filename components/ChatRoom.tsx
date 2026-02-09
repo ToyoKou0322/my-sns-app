@@ -32,17 +32,17 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
   const [posts, setPosts] = useState<any[]>([]);
   const [inputText, setInputText] = useState("");
   const [showStamps, setShowStamps] = useState(false);
-  
-  // ▼ 送信中かどうかを管理するフラグ
   const [isSending, setIsSending] = useState(false);
 
   const scrollBottomRef = useRef<HTMLDivElement>(null);
   const prevPostsLength = useRef(0);
   const isRoomChanged = useRef(false);
 
-  // 1. 部屋に入っている間、投稿が増えるたびに「最後に見た時間」を更新
+  // ▼ 画像選択用の隠しinputを操作するためのRef
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // 1. 既読管理
   useEffect(() => {
-    // 自分の投稿でNewがつかないよう、少し未来の時間(+5秒)を保存
     const safeReadTime = Date.now() + 5000;
     localStorage.setItem(`lastRead_${currentRoom.id}`, safeReadTime.toString());
   }, [currentRoom.id, posts]); 
@@ -78,13 +78,40 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
     prevPostsLength.current = currentLength;
   }, [posts.length]);
 
-  // --- アクション ---
-  const handleAddPost = async () => {
-    // 空文字または「送信中」なら何もしない（連打防止）
-    if (inputText === "" || isSending) return;
-    
-    setIsSending(true); // 送信開始！ロックをかける
+  // ▼ 画像圧縮関数 (チャット用なので少し大きめの500pxまで許可)
+  const compressImage = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = (event) => {
+        const img = new Image();
+        img.src = event.target?.result as string;
+        img.onload = () => {
+          const canvas = document.createElement("canvas");
+          const MAX_WIDTH = 500; // チャット用なので500pxくらい
+          const scaleSize = MAX_WIDTH / img.width;
+          // 幅が500pxより小さければそのまま、大きければ縮小
+          canvas.width = img.width > MAX_WIDTH ? MAX_WIDTH : img.width;
+          canvas.height = img.width > MAX_WIDTH ? img.height * scaleSize : img.height;
 
+          const ctx = canvas.getContext("2d");
+          ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
+          
+          const dataUrl = canvas.toDataURL("image/jpeg", 0.7);
+          resolve(dataUrl);
+        };
+        img.onerror = (error) => reject(error);
+      };
+      reader.onerror = (error) => reject(error);
+    });
+  };
+
+  // --- アクション ---
+
+  // テキスト送信
+  const handleAddPost = async () => {
+    if (inputText === "" || isSending) return;
+    setIsSending(true);
     try {
       await addDoc(collection(db, "posts"), {
         text: inputText,
@@ -96,24 +123,19 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
         likedBy: [],
         type: "text"
       });
-
-      await updateDoc(doc(db, "rooms", currentRoom.id), {
-        lastPostedAt: serverTimestamp()
-      });
-
+      await updateDoc(doc(db, "rooms", currentRoom.id), { lastPostedAt: serverTimestamp() });
       setInputText("");
     } catch (error) {
       console.error(error);
-      alert("送信に失敗しました");
     } finally {
-      setIsSending(false); // 送信終了！ロック解除
+      setIsSending(false);
     }
   };
 
+  // スタンプ送信
   const handleSendStamp = async (stamp: string) => {
-    if (isSending) return; // スタンプも連打防止
+    if (isSending) return;
     setIsSending(true);
-
     try {
       await addDoc(collection(db, "posts"), {
         text: stamp,
@@ -125,16 +147,43 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
         likedBy: [],
         type: "stamp"
       });
-
-      await updateDoc(doc(db, "rooms", currentRoom.id), {
-        lastPostedAt: serverTimestamp()
-      });
-
+      await updateDoc(doc(db, "rooms", currentRoom.id), { lastPostedAt: serverTimestamp() });
       setShowStamps(false);
     } catch (error) {
       console.error(error);
     } finally {
       setIsSending(false);
+    }
+  };
+
+  // ▼ 画像送信 (ここを追加！)
+  const handleSendImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || isSending) return;
+    
+    setIsSending(true);
+    try {
+      const base64String = await compressImage(file);
+
+      await addDoc(collection(db, "posts"), {
+        text: base64String, // 画像データをtextフィールドに入れる
+        author: user.displayName,
+        uid: user.uid,
+        photoURL: user.photoURL,
+        roomId: currentRoom.id,
+        createdAt: new Date(),
+        likedBy: [],
+        type: "image" // ★タイプをimageにする
+      });
+      await updateDoc(doc(db, "rooms", currentRoom.id), { lastPostedAt: serverTimestamp() });
+      
+    } catch (error) {
+      console.error("Image send error:", error);
+      alert("画像の送信に失敗しました");
+    } finally {
+      setIsSending(false);
+      // 同じ画像を連続で送れるようにinputをリセット
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
   
@@ -147,7 +196,6 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
     const currentLikedBy = post.likedBy || [];
     const isLiked = currentLikedBy.includes(user.uid);
     const postRef = doc(db, "posts", post.id);
-
     if (isLiked) {
       await updateDoc(postRef, { likedBy: arrayRemove(user.uid) });
     } else {
@@ -165,7 +213,6 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
     try {
       const roomRef = doc(db, "rooms", dmRoomId);
       const roomSnap = await getDoc(roomRef);
-
       if (!roomSnap.exists()) {
         await setDoc(roomRef, {
           title: `DM: ${user.displayName} & ${targetUser.author}`,
@@ -182,14 +229,11 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
         title: roomSnap.exists() ? roomSnap.data().title : `DM: ${user.displayName} & ${targetUser.author}`,
         type: "dm"
       };
-      // DMに入る時も既読にする(+5秒バッファ)
       const safeReadTime = Date.now() + 5000;
       localStorage.setItem(`lastRead_${dmRoomId}`, safeReadTime.toString());
       setCurrentRoom(roomData);
-
     } catch (error) {
       console.error("DM Error:", error);
-      alert("DMの開始に失敗しました");
     }
   };
 
@@ -215,7 +259,7 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
             <div key={post.id} className={`flex gap-2 mb-4 max-w-[80%] ${post.uid === user.uid ? "ml-auto flex-row-reverse" : ""}`}>
               <div className="cursor-pointer hover:opacity-80" onClick={() => handleStartDM(post)} title="クリックしてDMを送る">
                 {post.photoURL ? (
-                  <img src={post.photoURL} alt="icon" className="w-10 h-10 rounded-full border border-gray-300"/>
+                  <img src={post.photoURL} alt="icon" className="w-10 h-10 rounded-full border border-gray-300 object-cover"/>
                 ) : (
                   <div className="w-10 h-10 rounded-full bg-gray-300 flex-shrink-0"></div>
                 )}
@@ -227,11 +271,23 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
                   </p>
                   <p className="text-[10px] text-gray-400 ml-2">{formatDate(post.createdAt)}</p>
                 </div>
+                
+                {/* ▼ 投稿タイプによって表示を変える ▼ */}
                 {post.type === "stamp" ? (
                   <p className="text-6xl">{post.text}</p>
+                ) : post.type === "image" ? (
+                  // 画像の場合
+                  <img 
+                    src={post.text} 
+                    alt="posted image" 
+                    className="max-w-full rounded-lg border border-gray-200 cursor-pointer"
+                    onClick={() => window.open(post.text, '_blank')} // クリックで拡大(別タブ)
+                  />
                 ) : (
+                  // テキストの場合
                   <p className="text-gray-800 whitespace-pre-wrap">{post.text}</p>
                 )}
+                
                 <div className="flex justify-end mt-2 gap-2 items-center">
                   <button onClick={() => handleLike(post)} className={`text-xs rounded px-2 py-1 transition flex items-center gap-1 ${isLiked ? "bg-pink-100 text-pink-500 font-bold border border-pink-200" : "bg-white text-gray-400 border border-gray-200 hover:bg-gray-50"}`}>
                     {isLiked ? "❤️" : "🤍"} <span>{likeCount}</span>
@@ -257,14 +313,33 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
               ))}
             </div>
           )}
+          
           <div className="flex gap-2 items-end">
-            <button onClick={() => setShowStamps(!showStamps)} className="bg-yellow-400 text-white px-3 py-2 rounded-lg text-xl mb-1">☺</button>
+            {/* ▼ カメラボタンを追加 */}
+            <button 
+              onClick={() => fileInputRef.current?.click()} // 隠しinputをクリック
+              className="bg-gray-200 text-gray-600 px-3 py-2 rounded-lg text-xl mb-1 hover:bg-gray-300"
+              disabled={isSending}
+              title="画像を送る"
+            >
+              📷
+            </button>
+            {/* 隠しファイル入力 */}
+            <input 
+              type="file" 
+              accept="image/*" 
+              ref={fileInputRef}
+              onChange={handleSendImage}
+              className="hidden"
+            />
+
+            <button onClick={() => setShowStamps(!showStamps)} className="bg-yellow-400 text-white px-3 py-2 rounded-lg text-xl mb-1 hover:bg-yellow-500">☺</button>
+            
             <textarea value={inputText} onChange={(e) => setInputText(e.target.value)} className="flex-1 border p-2 rounded-lg text-black bg-gray-50 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="メッセージを入力..." rows={2}/>
             
-            {/* ▼ 送信ボタンの制御を追加 */}
             <button 
               onClick={handleAddPost}
-              disabled={isSending} // 送信中は無効化
+              disabled={isSending}
               className={`${isSending ? "bg-gray-400 cursor-not-allowed" : "bg-blue-600"} text-white px-6 py-2 rounded-lg font-bold mb-1`}
             >
               {isSending ? "..." : "送信"}
