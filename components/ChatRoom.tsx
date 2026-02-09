@@ -10,6 +10,10 @@ import {
 import { db } from "../firebaseConfig";
 import UrlPreview from "./UrlPreview"; 
 
+// ▼ シンタックスハイライト用のライブラリ
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
+
 const STAMPS = ["👍", "🎉", "😂", "🙏", "❤️", "😭"];
 
 const formatDate = (timestamp: any) => {
@@ -23,7 +27,7 @@ const formatDate = (timestamp: any) => {
   });
 };
 
-// ▼ URLを抽出する正規表現
+// URLを抽出する正規表現
 const URL_REGEX = /(https?:\/\/[^\s]+)/g;
 
 type Props = {
@@ -80,7 +84,7 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
     prevPostsLength.current = currentLength;
   }, [posts.length]);
 
-  // ▼ 画像圧縮関数
+  // 画像圧縮関数
   const compressImage = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -230,6 +234,7 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
     }
   };
 
+  // テキスト内のURLをリンクにして、プレビュー用のURLを見つける関数
   const renderTextWithLinks = (text: string) => {
     const urls = text.match(URL_REGEX);
     const firstUrl = urls ? urls[0] : null;
@@ -237,17 +242,51 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
     
     return (
       <>
-        <p className="text-gray-800 whitespace-pre-wrap">
-          {parts.map((part, i) => 
-            part.match(URL_REGEX) ? (
-              <a key={i} href={part} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline break-all">
-                {part}
-              </a>
-            ) : part
-          )}
-        </p>
+        {parts.map((part, i) => 
+          part.match(URL_REGEX) ? (
+            <a key={i} href={part} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline break-all">
+              {part}
+            </a>
+          ) : part
+        )}
         {firstUrl && <UrlPreview url={firstUrl} />}
       </>
+    );
+  };
+
+  // ▼ コードブロックと通常のテキストを振り分ける関数
+  const renderMessageContent = (text: string) => {
+    // ```言語名 コード内容 ``` のパターンで分割する
+    // (capturing groupを使うことで、splitした配列にコード部分も含まれるようにする)
+    const parts = text.split(/(```[\w]*\n?[\s\S]*?```)/g);
+
+    return (
+      <div className="text-gray-800 whitespace-pre-wrap">
+        {parts.map((part, index) => {
+          // コードブロックかどうかの判定
+          if (part.startsWith("```") && part.endsWith("```")) {
+            // "```javascript" などの言語指定を取り出す
+            const match = part.match(/^```(\w*)\n?([\s\S]*?)```$/);
+            const language = match ? match[1] : "";
+            const code = match ? match[2] : part.slice(3, -3); // マッチしなかったら単純に前後を削る
+
+            return (
+              <div key={index} className="my-2 rounded-md overflow-hidden text-sm">
+                <SyntaxHighlighter 
+                  language={language || "text"} 
+                  style={vscDarkPlus}
+                  PreTag="div"
+                >
+                  {code.replace(/^\n/, "")} 
+                </SyntaxHighlighter>
+              </div>
+            );
+          } else {
+            // 通常のテキスト（URLリンク処理を通す）
+            return <span key={index}>{renderTextWithLinks(part)}</span>;
+          }
+        })}
+      </div>
     );
   };
 
@@ -272,7 +311,6 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
           return (
             <div key={post.id} className={`flex gap-2 mb-4 max-w-[80%] items-start ${post.uid === user.uid ? "ml-auto flex-row-reverse" : ""}`}>
               
-              {/* アイコン表示部分 */}
               <div 
                 className="cursor-pointer hover:opacity-80 flex-shrink-0" 
                 onClick={() => handleStartDM(post)} 
@@ -285,14 +323,15 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
                 )}
               </div>
 
-              <div className={`p-3 rounded-lg ${post.uid === user.uid ? "bg-blue-100" : "bg-gray-100"}`}>
-                <div className="flex justify-between items-end mb-1 min-w-[100px]">
+              <div className={`p-3 rounded-lg ${post.uid === user.uid ? "bg-blue-100" : "bg-gray-100"} min-w-[100px]`}>
+                <div className="flex justify-between items-end mb-1">
                   <p className="text-xs text-gray-500 font-bold cursor-pointer hover:underline" onClick={() => handleStartDM(post)}>
                     {post.author}
                   </p>
                   <p className="text-[10px] text-gray-400 ml-2">{formatDate(post.createdAt)}</p>
                 </div>
                 
+                {/* ▼ 表示処理の分岐 ▼ */}
                 {post.type === "stamp" ? (
                   <p className="text-6xl">{post.text}</p>
                 ) : post.type === "image" ? (
@@ -303,7 +342,8 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
                     onClick={() => window.open(post.text, '_blank')} 
                   />
                 ) : (
-                  renderTextWithLinks(post.text)
+                  // ★ ここで新しい関数を使う（コードブロック対応）
+                  renderMessageContent(post.text)
                 )}
                 
                 <div className="flex justify-end mt-2 gap-2 items-center">
