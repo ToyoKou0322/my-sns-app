@@ -8,6 +8,7 @@ import {
   arrayUnion, arrayRemove, serverTimestamp
 } from "firebase/firestore"; 
 import { db } from "../firebaseConfig";
+import UrlPreview from "./UrlPreview"; // ← ★追加
 
 const STAMPS = ["👍", "🎉", "😂", "🙏", "❤️", "😭"];
 
@@ -21,6 +22,9 @@ const formatDate = (timestamp: any) => {
     minute: '2-digit' 
   });
 };
+
+// ▼ URLを抽出する正規表現
+const URL_REGEX = /(https?:\/\/[^\s]+)/g;
 
 type Props = {
   user: any;
@@ -37,17 +41,13 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
   const scrollBottomRef = useRef<HTMLDivElement>(null);
   const prevPostsLength = useRef(0);
   const isRoomChanged = useRef(false);
-
-  // ▼ 画像選択用の隠しinputを操作するためのRef
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 1. 既読管理
   useEffect(() => {
     const safeReadTime = Date.now() + 5000;
     localStorage.setItem(`lastRead_${currentRoom.id}`, safeReadTime.toString());
   }, [currentRoom.id, posts]); 
 
-  // 2. 投稿データの監視
   useEffect(() => {
     const q = query(
       collection(db, "posts"), 
@@ -60,12 +60,10 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
     return () => unsubscribe();
   }, [currentRoom]);
 
-  // 3. 部屋変更フラグ
   useEffect(() => {
     isRoomChanged.current = true;
   }, [currentRoom]);
 
-  // 4. 自動スクロール制御
   useEffect(() => {
     if (posts.length === 0) return;
     const currentLength = posts.length;
@@ -78,7 +76,6 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
     prevPostsLength.current = currentLength;
   }, [posts.length]);
 
-  // ▼ 画像圧縮関数 (チャット用なので少し大きめの500pxまで許可)
   const compressImage = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -88,15 +85,12 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
         img.src = event.target?.result as string;
         img.onload = () => {
           const canvas = document.createElement("canvas");
-          const MAX_WIDTH = 500; // チャット用なので500pxくらい
+          const MAX_WIDTH = 500;
           const scaleSize = MAX_WIDTH / img.width;
-          // 幅が500pxより小さければそのまま、大きければ縮小
           canvas.width = img.width > MAX_WIDTH ? MAX_WIDTH : img.width;
           canvas.height = img.width > MAX_WIDTH ? img.height * scaleSize : img.height;
-
           const ctx = canvas.getContext("2d");
           ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
-          
           const dataUrl = canvas.toDataURL("image/jpeg", 0.7);
           resolve(dataUrl);
         };
@@ -106,9 +100,6 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
     });
   };
 
-  // --- アクション ---
-
-  // テキスト送信
   const handleAddPost = async () => {
     if (inputText === "" || isSending) return;
     setIsSending(true);
@@ -132,7 +123,6 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
     }
   };
 
-  // スタンプ送信
   const handleSendStamp = async (stamp: string) => {
     if (isSending) return;
     setIsSending(true);
@@ -156,7 +146,6 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
     }
   };
 
-  // ▼ 画像送信 (ここを追加！)
   const handleSendImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || isSending) return;
@@ -164,25 +153,22 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
     setIsSending(true);
     try {
       const base64String = await compressImage(file);
-
       await addDoc(collection(db, "posts"), {
-        text: base64String, // 画像データをtextフィールドに入れる
+        text: base64String,
         author: user.displayName,
         uid: user.uid,
         photoURL: user.photoURL,
         roomId: currentRoom.id,
         createdAt: new Date(),
         likedBy: [],
-        type: "image" // ★タイプをimageにする
+        type: "image"
       });
       await updateDoc(doc(db, "rooms", currentRoom.id), { lastPostedAt: serverTimestamp() });
-      
     } catch (error) {
       console.error("Image send error:", error);
       alert("画像の送信に失敗しました");
     } finally {
       setIsSending(false);
-      // 同じ画像を連続で送れるようにinputをリセット
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
@@ -237,6 +223,34 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
     }
   };
 
+  // ▼ テキスト内のURLをリンクにして、プレビュー用のURLを見つける関数
+  const renderTextWithLinks = (text: string) => {
+    // 1. URLが含まれているかチェック
+    const urls = text.match(URL_REGEX);
+    // 2. 最初のURLだけプレビュー表示用に取得 (複数あると邪魔なので)
+    const firstUrl = urls ? urls[0] : null;
+
+    // 3. テキストをURLで分割して、リンクタグに置き換える
+    const parts = text.split(URL_REGEX);
+    
+    return (
+      <>
+        <p className="text-gray-800 whitespace-pre-wrap">
+          {parts.map((part, i) => 
+            part.match(URL_REGEX) ? (
+              <a key={i} href={part} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline break-all">
+                {part}
+              </a>
+            ) : part
+          )}
+        </p>
+        
+        {/* ▼ URLが見つかったらプレビューを表示 */}
+        {firstUrl && <UrlPreview url={firstUrl} />}
+      </>
+    );
+  };
+
   return (
     <div className="p-6 max-w-2xl mx-auto pb-40">
       <div className="flex justify-between items-center mb-4 border-b pb-4 sticky top-0 bg-white z-10">
@@ -272,20 +286,19 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
                   <p className="text-[10px] text-gray-400 ml-2">{formatDate(post.createdAt)}</p>
                 </div>
                 
-                {/* ▼ 投稿タイプによって表示を変える ▼ */}
+                {/* ▼ 表示処理の分岐 ▼ */}
                 {post.type === "stamp" ? (
                   <p className="text-6xl">{post.text}</p>
                 ) : post.type === "image" ? (
-                  // 画像の場合
                   <img 
                     src={post.text} 
                     alt="posted image" 
                     className="max-w-full rounded-lg border border-gray-200 cursor-pointer"
-                    onClick={() => window.open(post.text, '_blank')} // クリックで拡大(別タブ)
+                    onClick={() => window.open(post.text, '_blank')} 
                   />
                 ) : (
-                  // テキストの場合
-                  <p className="text-gray-800 whitespace-pre-wrap">{post.text}</p>
+                  // ★ ここで新しい関数を使う
+                  renderTextWithLinks(post.text)
                 )}
                 
                 <div className="flex justify-end mt-2 gap-2 items-center">
@@ -315,16 +328,14 @@ export default function ChatRoom({ user, currentRoom, setCurrentRoom }: Props) {
           )}
           
           <div className="flex gap-2 items-end">
-            {/* ▼ カメラボタンを追加 */}
             <button 
-              onClick={() => fileInputRef.current?.click()} // 隠しinputをクリック
+              onClick={() => fileInputRef.current?.click()} 
               className="bg-gray-200 text-gray-600 px-3 py-2 rounded-lg text-xl mb-1 hover:bg-gray-300"
               disabled={isSending}
               title="画像を送る"
             >
               📷
             </button>
-            {/* 隠しファイル入力 */}
             <input 
               type="file" 
               accept="image/*" 
